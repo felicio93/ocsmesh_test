@@ -1,0 +1,21 @@
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.venv/
+
+# data and run products (never commit)
+*.tif
+*.tiff
+*.nc
+*.2dm
+*.gr3
+*.npz
+dems/
+results/
+logs/
+slurm/
+reports/
+tmp/

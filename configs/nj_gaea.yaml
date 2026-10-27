@@ -1,0 +1,98 @@
+# NJ coastal benchmark on Gaea C6.
+#
+#   export GEBCO_FILE=/path/to/gebco_2024.tif      # downloaded once from https://download.gebco.net/
+#   ocsmesh-test data   -c configs/nj_gaea.yaml --validate
+#   ocsmesh-test slurm  -c configs/nj_gaea.yaml --submit
+#   ocsmesh-test report -c configs/nj_gaea.yaml --figures
+#
+# Paths are relative to base_dir (the repo root) unless absolute. ${VAR} expands environment variables.
+
+name: nj
+base_dir: ..                 # paths below are relative to the repo root
+results_root: results/nj
+reports_dir: reports
+
+domain:
+  shapefile: domain/AOI_domain_FC.shp     # 39.0-40.5 N, 75.0-73.0 W
+  buffer_deg: 0.0                            # extra margin for tile selection
+
+dems:
+  dir: dems/nj
+  tile_selection: polygon       # polygon (correct) | bbox (reproduces the all-nodata-tile bug, N1)
+  require_polygon: true         # drop tiles outside the AOI polygon again at run time
+  gebco:
+    file: ${GEBCO_FILE}
+    buffer_deg: 0.5
+  ncei:                         # listed low -> high priority; the last source wins where tiles overlap
+    - name: ncei_third          # ~10 m
+      dataset: NCEI_third_Topobathy_2014_8580
+      subfolders: [northeast_sandy]
+      tile_size_deg: 0.25
+    - name: ncei_ninth          # ~3 m, highest priority
+      dataset: NCEI_ninth_Topobathy_2014_8483
+      subfolders: [northeast_sandy, chesapeake_bay]
+      tile_size_deg: 0.25
+
+mesh:
+  hmin: 50.0
+  hmax: 3000.0
+  geom_zmin: -10000.0
+  geom_zmax: 10.0
+  engine: gmsh
+  bnd_representation: adapt
+
+refinements:
+  depth_bands:                  # add_constant_value
+    - {value: 3000.0, lower: null,  upper: -30.0}
+    - {value: 2500.0, lower: -30.0, upper: -25.0}
+    - {value: 2000.0, lower: -25.0, upper: -20.0}
+    - {value: 1500.0, lower: -20.0, upper: -15.0}
+    - {value: 1000.0, lower: -15.0, upper: null}
+  contour:                      # add_contour
+    level: 0.0
+    target_size: 200.0
+    expansion_rate: 0.001
+  flow_limiters:                # add_subtidal_flow_limiter
+    - {hmin: 100.0, hmax: 3000.0, lower: -10.0,  upper: 0.0}
+    - {hmin: 500.0, hmax: 3000.0, lower: -100.0, upper: -10.0}
+  channels:                     # add_channel; tolerance=null means no polygon simplification
+    - {width: 2000.0, target_size: 500.0, expansion_rate: 0.01, tolerance: null}
+
+tests:
+  - {id: 0, name: baseline,     description: "no refinements, hmax everywhere",        refinements: []}
+  - {id: 1, name: depth_bands,  description: "5 depth bands",                           refinements: [depth_bands]}
+  - {id: 2, name: contour,      description: "+ shoreline contour",                     refinements: [depth_bands, contour]}
+  - {id: 3, name: flow_limiter, description: "+ 2 flow limiters",                       refinements: [depth_bands, contour, flow_limiters]}
+  - {id: 4, name: channels,     description: "channels only",                           refinements: [channels]}
+  - {id: 5, name: full,         description: "all refinements",                         refinements: [depth_bands, contour, flow_limiters, channels]}
+
+methods: [fast, exact]
+
+# 18 tiles intersect the AOI polygon, so MPI runs use 19 ranks (1 manager + 18 workers).
+modes:
+  serial:        {nprocs: 1}
+  parallel:      {nprocs: 40}
+  mpi_no_pool:   {ntasks: 19, cpus_per_task: 1, nodes: 1}
+  mpi_hybrid:    {ntasks: 6,  cpus_per_task: 7, nodes: 1}
+  mpi_multinode: {ntasks: 19, cpus_per_task: 1, nodes: 2}
+
+cluster:                        # Gaea C6
+  account: nos-surge
+  partition: batch
+  qos: normal
+  clusters: c6
+  walltime: "16:00:00"
+  exclusive: true
+  mail_user: ${OCSMESH_TEST_EMAIL}
+  modules: [PrgEnv-intel]
+  env:
+    LD_LIBRARY_PATH: "${CRAY_LD_LIBRARY_PATH}:${LD_LIBRARY_PATH}"
+    FI_CXI_DEFAULT_CQ_SIZE: "1048576"
+    FI_CXI_OFLOW_BUF_SIZE: "8388608"
+    FI_CXI_RX_MATCH_MODE: software
+  conda_sh: /ncrc/proj/nos-surge/Felicio.Cassalho/miniconda3/etc/profile.d/conda.sh
+  conda_env: ocsmesh_mpi_test
+  launcher: srun
+  launcher_args: --cpu-bind=cores
+  script_dir: slurm/nj
+  log_dir: logs/nj

@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ocsmesh_test"
+version = "0.1.0"
+description = "Benchmark and regression-check harness for the OCSMesh MPI implementation (NJ benchmark on Gaea C6)."
+readme = "README.md"
+license = {file = "LICENSE"}
+requires-python = ">=3.10"
+authors = [{name = "Felicio Cassalho", email = "felicio.cassalho@noaa.gov"}]
+dependencies = [
+    "numpy",
+    "pyyaml",
+    "requests",
+    "rasterio",
+    "geopandas",
+    "shapely>=2.0",
+    "pyproj",
+    "scipy",
+    "matplotlib",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+mpi = ["mpi4py"]
+
+[project.scripts]
+ocsmesh-test = "ocsmesh_test.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["ocsmesh_test*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

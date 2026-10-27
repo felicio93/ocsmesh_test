@@ -1,0 +1,63 @@
+# Synthetic 5-tile stack (same shape as the NJ DEM stack) for running the whole
+# pipeline on a laptop, or as a quick MPI smoke test on a cluster.
+#
+#   ocsmesh-test data   -c configs/local_synthetic.yaml --validate
+#   ocsmesh-test run    -c configs/local_synthetic.yaml --test 1 --mode serial --method exact
+#   ocsmesh-test report -c configs/local_synthetic.yaml --figures
+
+name: synthetic
+base_dir: ..                 # paths below are relative to the repo root
+results_root: results/synthetic
+reports_dir: reports
+
+domain:
+  shapefile: dems/synthetic/domain.shp      # written by `data`
+
+dems:
+  dir: dems/synthetic
+  synthetic: {scale: 1.0}                   # >1 = coarser tiles, faster runs
+
+mesh:
+  hmin: 50.0
+  hmax: 3000.0
+  geom_zmin: -10000.0
+  geom_zmax: 10.0
+  engine: gmsh
+  bnd_representation: adapt
+
+refinements:
+  depth_bands:
+    - {value: 3000.0, lower: null,  upper: -30.0}
+    - {value: 2500.0, lower: -30.0, upper: -25.0}
+    - {value: 2000.0, lower: -25.0, upper: -20.0}
+    - {value: 1500.0, lower: -20.0, upper: -15.0}
+    - {value: 1000.0, lower: -15.0, upper: null}
+  contour:
+    level: 0.0
+    target_size: 300.0
+    expansion_rate: 0.005
+  flow_limiters:
+    - {hmin: 200.0, hmax: 3000.0, lower: -10.0, upper: 0.0}
+  channels:
+    - {width: 1000.0, target_size: 300.0, expansion_rate: 0.01, tolerance: 20.0}
+
+tests:
+  - {id: 0, name: baseline,    description: "no refinements",            refinements: []}
+  - {id: 1, name: depth_bands, description: "5 depth bands",             refinements: [depth_bands]}
+  - {id: 2, name: contour,     description: "+ contour",                 refinements: [depth_bands, contour]}
+  - {id: 3, name: channels,    description: "channels only",             refinements: [channels]}
+  - {id: 4, name: full,        description: "all refinements",           refinements: [depth_bands, contour, flow_limiters, channels]}
+
+methods: [fast, exact]
+
+modes:
+  serial:      {nprocs: 1}
+  parallel:    {nprocs: 4}
+  mpi_no_pool: {ntasks: 6, cpus_per_task: 1, nodes: 1}   # 5 tiles + 1 manager (cluster only)
+
+cluster:
+  walltime: "01:00:00"
+  exclusive: false
+  launcher: srun
+  script_dir: slurm/synthetic
+  log_dir: logs/synthetic
