@@ -41,6 +41,18 @@ def _index(rows):
     return {(r["test_id"], r["mode"], r["method"]): r for r in rows}
 
 
+def _ocsmesh_versions(rows) -> str:
+    """Branch @ commit; lists which runs used which commit when they differ."""
+    runs: Dict[str, List[str]] = {}
+    for r in rows:
+        env = r.get("env") or {}
+        key = f"{env.get('ocsmesh_branch', '?')} @ {env.get('ocsmesh_commit', '?')}"
+        runs.setdefault(key, []).append(f"{r['mode']} {r['method']}")
+    if len(runs) <= 1:
+        return next(iter(runs), "?")
+    return "; ".join(f"{k} ({', '.join(v)})" for k, v in runs.items())
+
+
 def render(cfg: Config, rows: List[Dict[str, Any]]) -> str:
     # size-function-only runs are their own "method" so they never mix with full runs
     rows = [dict(r, method=f"{r['method']}-hfun") if r.get("hfun_only") else r for r in rows]
@@ -61,7 +73,7 @@ def render(cfg: Config, rows: List[Dict[str, Any]]) -> str:
     w("")
     w("| item | value |")
     w("|---|---|")
-    w(f"| OCSMesh | {env.get('ocsmesh_branch', '?')} @ {env.get('ocsmesh_commit', '?')} |")
+    w(f"| OCSMesh | {_ocsmesh_versions(rows)} |")
     w(f"| host | {env.get('hostname', '?')} (python {env.get('python', '?')}) |")
     w(f"| hmin / hmax | {cfg.get('mesh.hmin')} / {cfg.get('mesh.hmax')} m |")
     w(f"| engine | {cfg.get('mesh.engine', 'gmsh')} ({cfg.get('mesh.bnd_representation', 'adapt')}) |")

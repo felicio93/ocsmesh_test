@@ -156,3 +156,12 @@ def test_report_keeps_hfun_only_runs_separate():
     assert "| 1 | serial | exact | success" in md
     assert "| 1 | serial | exact-hfun | success" in md
     assert "## fast-hfun vs exact-hfun" in md
+
+
+def test_report_lists_each_ocsmesh_commit():
+    cfg = load_config(CONFIGS / "local_synthetic.yaml")
+    old = dict(_row(1, "serial", "exact", 1000, 500.0), env={"ocsmesh_branch": "b", "ocsmesh_commit": "aaa"})
+    new = dict(_row(1, "parallel", "exact", 1000, 500.0), env={"ocsmesh_branch": "b", "ocsmesh_commit": "bbb"})
+    md = report.render(cfg, [old, new])
+    assert "b @ aaa (serial exact); b @ bbb (parallel exact)" in md
+    assert "| OCSMesh | b @ aaa |" in report.render(cfg, [old])
