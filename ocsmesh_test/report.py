@@ -64,7 +64,10 @@ def render(cfg: Config, rows: List[Dict[str, Any]]) -> str:
     w(f"| engine | {cfg.get('mesh.engine', 'gmsh')} ({cfg.get('mesh.bnd_representation', 'adapt')}) |")
     n_r = next((r.get("n_rasters") for r in rows if r.get("n_rasters")), "?")
     w(f"| rasters | {n_r} |")
-    w(f"| modes | {', '.join(f'{m} ({_mode_desc(cfg, m)})' for m in modes)} |")
+    w(f"| modes | {', '.join(f'{m} ({_mode_desc(cfg, m, rows)})' for m in modes)} |")
+    if cfg.get("report_note"):
+        w("")
+        w(f"> {cfg.get('report_note').strip()}")
     w("")
     w("| test | name | refinements |")
     w("|---|---|---|")
@@ -191,10 +194,13 @@ def render(cfg: Config, rows: List[Dict[str, Any]]) -> str:
     return "\n".join(out)
 
 
-def _mode_desc(cfg: Config, mode: str) -> str:
+def _mode_desc(cfg: Config, mode: str, rows=()) -> str:
     m = cfg.mode(mode)
     if cfg.is_mpi_mode(mode):
-        return f"{m.get('ntasks')} ranks x {m.get('cpus_per_task', 1)} cpu, {m.get('nodes', 1)} node(s)"
+        # actual rank count from the runs (``ntasks: auto`` is resolved at submit time)
+        ranks = next((r.get("env", {}).get("mpi_size") for r in rows
+                      if r.get("mode") == mode and r.get("env", {}).get("mpi_size")), m.get("ntasks"))
+        return f"{ranks} ranks x {m.get('cpus_per_task', 1)} cpu, {m.get('nodes', 1)} node(s)"
     return f"{m.get('nprocs', 1)} proc(s)"
 
 
@@ -216,7 +222,7 @@ def write_figures(cfg: Config, rows: List[Dict[str, Any]], out_dir: Path,
         hp = r.get("hfun_path")
         if not hp or not Path(hp).exists():
             continue
-        md = Mesh.open(hp, crs="EPSG:4326").meshdata
+        md = Mesh.open(hp, crs=r.get("hfun_crs") or "EPSG:4326").meshdata  # .2dm carries no CRS
         if md.crs is not None and not CRS.from_user_input(md.crs).is_geographic:
             utils.reproject(md, CRS.from_epsg(4326))
         c, v = md.coords, np.asarray(md.values).ravel()

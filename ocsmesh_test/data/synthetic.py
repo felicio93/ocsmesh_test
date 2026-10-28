@@ -53,10 +53,11 @@ def write_tile(path: Path, res: float, bounds: Sequence[float],
     return path
 
 
-def nj_like_stack(dem_dir: Path, scale: float = 1.0) -> List[Dict]:
+def nj_like_stack(dem_dir: Path, scale: float = 1.0, margins: bool = True) -> List[Dict]:
     """The standard 5-tile synthetic stack; returns manifest entries in priority order.
 
-    ``scale`` multiplies pixel sizes (use >1 for faster runs).
+    ``scale`` multiplies pixel sizes (use >1 for faster runs). ``margins=False``
+    writes the same tiles without their nodata borders (control case).
     """
     dem_dir = Path(dem_dir)
     spec = [
@@ -70,7 +71,7 @@ def nj_like_stack(dem_dir: Path, scale: float = 1.0) -> List[Dict]:
     entries = []
     for i, (name, res, bounds, border) in enumerate(spec):
         path = dem_dir / f"{name}.tif"
-        write_tile(path, res, bounds, nodata_border_px=border)
+        write_tile(path, res, bounds, nodata_border_px=border if margins else 0)
         entries.append({
             "name": name, "source": name.split("/")[0], "path": str(path),
             "url": "synthetic", "available": True, "bounds": list(bounds),

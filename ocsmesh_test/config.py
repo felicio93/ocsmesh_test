@@ -3,12 +3,23 @@
 A config file describes one benchmark: domain, DEM sources, mesh recipe,
 test matrix, execution modes and the cluster (SLURM) settings. String
 values may contain ``${ENV_VAR}`` and ``~``; relative paths are resolved
-against the directory that holds the config file.
+against ``base_dir`` (default: the directory that holds the config file).
+
+Expansion rules:
+
+* ``cluster.env`` and ``cluster.modules`` are **not** expanded: they are
+  written verbatim into the SLURM scripts and expanded on the compute
+  node, after ``module load`` (e.g. ``${CRAY_LD_LIBRARY_PATH}``).
+* A value that still references an undefined variable after expansion is
+  replaced by ``None`` and recorded in :attr:`Config.unresolved`, so
+  optional settings (mail address) are simply dropped and required ones
+  (GEBCO file) fail with a message naming the variable.
 """
 
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -16,15 +27,24 @@ from typing import Any, Dict, List, Optional
 import yaml
 
 MPI_MODE_PREFIX = "mpi"
+_VERBATIM_KEYS = ("cluster.env", "cluster.modules")
+_UNRESOLVED_RE = re.compile(r"\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?")
 
 
-def _expand(value: Any) -> Any:
+def _expand(value: Any, key: str, unresolved: Dict[str, str]) -> Any:
+    if key in _VERBATIM_KEYS:
+        return value
     if isinstance(value, str):
-        return os.path.expanduser(os.path.expandvars(value))
+        out = os.path.expanduser(os.path.expandvars(value))
+        m = _UNRESOLVED_RE.search(out)
+        if m:
+            unresolved[key] = m.group(1)
+            return None
+        return out
     if isinstance(value, list):
-        return [_expand(v) for v in value]
+        return [_expand(v, f"{key}[{i}]", unresolved) for i, v in enumerate(value)]
     if isinstance(value, dict):
-        return {k: _expand(v) for k, v in value.items()}
+        return {k: _expand(v, f"{key}.{k}" if key else str(k), unresolved) for k, v in value.items()}
     return value
 
 
@@ -34,7 +54,15 @@ class Config:
 
     raw: Dict[str, Any]
     path: Path
+    unresolved: Dict[str, str] = field(default_factory=dict)
     base_dir: Path = field(init=False)
+
+    def require(self, dotted: str) -> Any:
+        """Like ``self[dotted]`` but names the missing environment variable."""
+        if dotted in self.unresolved:
+            raise KeyError(f"config key {dotted} needs environment variable "
+                           f"${self.unresolved[dotted]}, which is not set")
+        return self[dotted]
 
     def __post_init__(self) -> None:
         # Relative paths resolve against the config's directory, or against
@@ -128,4 +156,6 @@ def load_config(path: os.PathLike | str) -> Config:
     p = Path(path)
     with open(p, encoding="utf-8") as fh:
         raw = yaml.safe_load(fh) or {}
-    return Config(raw=_expand(raw), path=p)
+    unresolved: Dict[str, str] = {}
+    expanded = _expand(raw, "", unresolved)
+    return Config(raw=expanded, path=p, unresolved=unresolved)

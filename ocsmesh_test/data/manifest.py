@@ -61,7 +61,11 @@ def build(cfg: Config, dry_run: bool = False, validate: bool = False) -> List[Di
         buffer_deg = float(cfg.get("domain.buffer_deg", 0.0))
         selection = cfg.get("dems.tile_selection", "polygon")
 
-        gfile = cfg.get("dems.gebco.file")
+        gfile = None
+        if isinstance(cfg.get("dems.gebco"), dict):
+            gfile = cfg.require("dems.gebco.file")     # names the missing env var
+            if not dry_run and not Path(gfile).exists():
+                raise FileNotFoundError(f"GEBCO file not found: {gfile}")
         if gfile:
             dest = out_dir / "gebco" / f"gebco_{cfg.name}.tif"
             if dry_run:
@@ -119,7 +123,12 @@ def load(cfg: Config) -> List[Dict]:
 
 
 def raster_paths(entries: List[Dict], domain=None, require_polygon: bool = True) -> List[str]:
-    """Paths in priority order; optionally drop tiles that miss the AOI polygon."""
+    """Paths in priority order.
+
+    Drops unavailable tiles, tiles that ``--validate`` found to have no
+    valid data inside the AOI, and (``require_polygon``) tiles whose real
+    file bounds miss the AOI polygon.
+    """
     paths = []
     for e in sorted(entries, key=lambda e: e["priority"]):
         if not e.get("available"):
@@ -129,6 +138,9 @@ def raster_paths(entries: List[Dict], domain=None, require_polygon: bool = True)
         if not p.exists():
             _logger.warning("missing file %s", p)
             continue
+        if e.get("valid_fraction") == 0.0:
+            _logger.info("skipping tile with no valid data inside the AOI: %s", e["name"])
+            continue
         if require_polygon and domain is not None:
             with rasterio.open(p) as src:
                 if not box(*src.bounds).intersects(domain):
@@ -136,6 +148,13 @@ def raster_paths(entries: List[Dict], domain=None, require_polygon: bool = True)
                     continue
         paths.append(str(p))
     return paths
+
+
+def count_usable(cfg: Config) -> int:
+    """Number of rasters a run will pass to OCSMesh (after all filters)."""
+    domain, _ = load_domain(cfg)
+    return len(raster_paths(load(cfg), domain,
+                            require_polygon=bool(cfg.get("dems.require_polygon", True))))
 
 
 def summary_table(entries: List[Dict]) -> str:

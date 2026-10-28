@@ -26,6 +26,18 @@ def log_dir(cfg: Config) -> Path:
     return cfg.resolve("cluster.log_dir", f"logs/{cfg.name}")
 
 
+def resolve_ntasks(cfg: Config, mode_cfg) -> int:
+    """``ntasks: auto`` = one worker rank per usable tile + the manager rank."""
+    ntasks = mode_cfg["ntasks"]
+    if str(ntasks).lower() != "auto":
+        return int(ntasks)
+    from .data import manifest  # local: needs the manifest on disk
+    try:
+        return manifest.count_usable(cfg) + 1
+    except FileNotFoundError as exc:
+        raise RuntimeError("ntasks: auto needs the manifest; run `ocsmesh-test data` first") from exc
+
+
 def render(cfg: Config, test_id: int, mode: str, method: str) -> str:
     test = cfg.test(test_id)
     m = cfg.mode(mode)
@@ -37,7 +49,7 @@ def render(cfg: Config, test_id: int, mode: str, method: str) -> str:
 
     nodes = int(m.get("nodes", 1))
     if cfg.is_mpi_mode(mode):
-        ntasks = int(m["ntasks"])
+        ntasks = resolve_ntasks(cfg, m)
         cpus = int(m.get("cpus_per_task", 1))
     else:
         ntasks = 1
@@ -68,7 +80,7 @@ def render(cfg: Config, test_id: int, mode: str, method: str) -> str:
     sbatch.extend(cl.get("extra_sbatch", []) or [])
 
     env_lines = [f"module load {mod}" for mod in (cl.get("modules") or [])]
-    env_lines += [f"export {k}={v}" for k, v in (cl.get("env") or {}).items()]
+    env_lines += [f'export {k}="{v}"' for k, v in (cl.get("env") or {}).items()]  # expanded on the compute node
     if cl.get("conda_sh"):
         env_lines.append(f'source "{cl["conda_sh"]}"')
     if cl.get("conda_env"):

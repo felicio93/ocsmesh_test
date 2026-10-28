@@ -62,8 +62,9 @@ def clipped_tile_serial_vs_mpi(tmp: Path) -> CheckResult:
 
 
 @check("hfun.channel_detection_parallel",
-       "channel detection runs per raster in the workers when nprocs>1 (it was serial on the "
-       "coordinator and took 95% of NJ t4); results must stay identical", issue="N2")
+       "parallel channel refinement gives the same rasters as serial; detection time is "
+       "reported for information (NJ phase timers are the real measure; detection took 95% "
+       "of NJ t4)", issue="N2")
 def channel_detection_parallel(tmp: Path) -> CheckResult:
     from ocsmesh import Hfun
     from .. import timing

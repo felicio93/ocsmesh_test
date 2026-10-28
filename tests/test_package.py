@@ -36,14 +36,44 @@ def test_shipped_configs_load():
 
 
 def test_ncei_tile_name_parsing_and_selection():
-    assert ncei.parse_sw_corner("ncei19_n39x50_w074x75_2018v2.tif") == (39.5, -74.75)
-    assert ncei.parse_sw_corner("ncei13_n40x25_e010x00_2014v1.tif") == (40.25, 10.0)
-    assert ncei.parse_sw_corner("readme.txt") is None
-    names = ["ncei19_n39x50_w074x75_2018v2.tif",   # touches the domain
-             "ncei19_n40x25_w073x75_2018v2.tif"]   # inside the bbox but outside the circle
-    domain = Point(-74.5, 39.6).buffer(0.2)
+    # names give the NORTH-WEST corner (verified on the real tile header)
+    assert ncei.parse_nw_corner("ncei19_n39x50_w074x75_2018v2.tif") == (39.5, -74.75)
+    assert ncei.parse_nw_corner("ncei13_n40x25_e010x00_2014v1.tif") == (40.25, 10.0)
+    assert ncei.parse_nw_corner("readme.txt") is None
+    assert ncei.tile_box("ncei19_n39x50_w074x75_2018v2.tif", 0.25).bounds == (-74.75, 39.25, -74.5, 39.5)
+    names = ["ncei19_n39x50_w074x75_2018v2.tif",   # 39.25-39.50 N: inside the circle
+             "ncei19_n40x50_w073x25_2018v2.tif"]   # inside the bbox, outside the circle
+    domain = Point(-74.5, 39.4).buffer(0.2)
     assert ncei.select_tiles(names, domain, 0.25, "polygon") == names[:1]
     assert ncei.select_tiles(names, box(-75, 39, -73, 40.5), 0.25, "bbox") == names
+
+
+def test_env_expansion_rules(tmp_path, monkeypatch):
+    monkeypatch.setenv("SET_VAR", "/data")
+    monkeypatch.delenv("UNSET_VAR", raising=False)
+    p = tmp_path / "c.yaml"
+    p.write_text(
+        "name: e\n"
+        "dems:\n"
+        "  dir: ${SET_VAR}/dems\n"
+        "  gebco:\n"
+        "    file: ${UNSET_VAR}/g.tif\n"
+        "cluster:\n"
+        "  mail_user: ${UNSET_VAR}\n"
+        "  modules: [PrgEnv-intel]\n"
+        "  env:\n"
+        "    LD_LIBRARY_PATH: \"${CRAY_LD}:${LD_LIBRARY_PATH}\"\n"
+        "tests:\n"
+        "  - {id: 0, name: a}\n")
+    cfg = load_config(p)
+    assert cfg.get("dems.dir") == "/data/dems"
+    assert cfg.get("cluster.mail_user") is None                     # optional: dropped
+    assert cfg.get("cluster.env.LD_LIBRARY_PATH") == "${CRAY_LD}:${LD_LIBRARY_PATH}"  # verbatim
+    with pytest.raises(KeyError, match="UNSET_VAR"):
+        cfg.require("dems.gebco.file")
+    txt = slurm.render(cfg, 0, "serial", "exact")
+    assert "--mail-user" not in txt
+    assert 'export LD_LIBRARY_PATH="${CRAY_LD}:${LD_LIBRARY_PATH}"' in txt
 
 
 def test_synthetic_manifest_validation_flags_empty_tiles(tmp_path):
@@ -61,8 +91,9 @@ def test_synthetic_manifest_validation_flags_empty_tiles(tmp_path):
     assert str(empty) not in paths and len(paths) == 5
 
 
-def test_slurm_render_has_resources(tmp_path):
+def test_slurm_render_has_resources(tmp_path, monkeypatch):
     cfg = load_config(CONFIGS / "nj_gaea.yaml")
+    monkeypatch.setattr("ocsmesh_test.data.manifest.count_usable", lambda cfg: 18)  # ntasks: auto
     txt = slurm.render(cfg, 2, "mpi_multinode", "exact")
     assert "#SBATCH --nodes=2" in txt and "#SBATCH --ntasks=19" in txt
     assert "#SBATCH --ntasks-per-node=10" in txt

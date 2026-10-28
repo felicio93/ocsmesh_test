@@ -39,11 +39,16 @@ ocsmesh-test report -c configs/nj_gaea.yaml --figures    # reports/nj_report_<da
 srun -n 6 ocsmesh-test check                             # MPI checks too
 ```
 
-Run on the login node only the `data`, `slurm` and `report` steps; `run` is what the SLURM
-scripts execute. `--validate` writes the valid-data fraction of each tile inside the AOI into the
+Clone the repo on the shared scratch filesystem (`/gpfs/f6/...` on Gaea): results and the
+per-run `TMPDIR` live under it and must be visible to every node. Run on the login node only
+the `data`, `slurm` and `report` steps; `run` is what the SLURM scripts execute. MPI modes
+with `ntasks: auto` get one worker rank per usable tile plus the manager, counted from the
+manifest when the scripts are written. `--validate` writes the valid-data fraction of each tile inside the AOI into the
 manifest, which is how the all-nodata tiles that flattened the NJ size function are detected.
-Tiles are selected by the AOI *polygon* (`dems.tile_selection: polygon`); set `bbox` to reproduce
-the old behaviour on purpose.
+Tiles are selected for download by the AOI *polygon* (`dems.tile_selection: polygon`; set
+`bbox` to reproduce the old behaviour on purpose), using footprints derived from the tile
+names, which encode the tile's **north-west** corner. At run time the real file bounds and the
+valid-data fraction decide which rasters reach OCSMesh.
 
 ## What the report contains
 
@@ -73,7 +78,9 @@ the old behaviour on purpose.
 | `hfun.dem_east_of_180_metric_crs` | fix 3/4 | DEM east of 180 gives a metric size function |
 | `utils.clip_elevation` | feature | `utils.clip_elevation(mesh, min, max)` |
 
-Checks are expected to fail on an unfixed OCSMesh; the table they produce documents the state of
+For MPI checks on more than one node set `OCSMESH_SHARED_TMPDIR` to a shared directory. A
+check that runs longer than `OCSMESH_CHECK_TIMEOUT` seconds (default 1800) aborts all ranks
+instead of hanging. Checks are expected to fail on an unfixed OCSMesh; the table they produce documents the state of
 the branch. Under an MPI launcher every rank runs every check (constructing an `HfunCollector` is
 collective); only rank 0 reports.
 
@@ -90,6 +97,12 @@ collective); only rank 0 reports.
 | `methods` | `fast`, `exact` |
 | `modes.*` | `serial`/`parallel` (`nprocs`), `mpi_*` (`ntasks`, `cpus_per_task`, `nodes`) |
 | `cluster.*` | account, partition, qos, clusters, walltime, modules, env, conda, launcher |
+| `report_note` | text shown under the setup table of the report |
+
+`${VAR}` and `~` are expanded when the config is loaded, except in `cluster.env` and
+`cluster.modules`, which are written verbatim into the SLURM scripts and expanded on the
+compute node. A value referring to an unset variable becomes empty: optional settings are
+dropped, required ones (the GEBCO file) fail with a message naming the variable.
 
 ## Layout
 

@@ -80,16 +80,24 @@ def all_nodata_tile_with_channels(tmp: Path) -> CheckResult:
        "exact method: a higher-priority tile's nodata margin must not override valid "
        "lower-priority data (tile-edge strips in the NJ exact size function)", issue="seam")
 def nodata_margin_seam_exact(tmp: Path) -> CheckResult:
+    """Same tiles with and without nodata margins must give the same size function.
+
+    The region checked (x >= 0.32, inside the AOI) is entirely in the 1000 m
+    band and covered by valid lower-priority data under every margin, so any
+    node off 1000 m there is caused by the margins. The no-margin run is the
+    control: if it is not clean, the check reports an error, not a failure.
+    """
     from pyproj import CRS
+    from shapely import contains_xy
     from ocsmesh import Hfun, utils
 
-    entries = synthetic.nj_like_stack(tmp / "dems")
     aoi = synthetic.nj_like_domain()
-    paths = [e["path"] for e in entries]
-    out = {}
-    for method in ("exact", "fast"):
-        h = Hfun(paths, hmin=HMIN, hmax=HMAX, nprocs=1, base_shape=aoi,
-                 base_shape_crs="EPSG:4326", method=method)
+    region = box(0.32, 0.06, 0.70, 0.54).intersection(aoi.buffer(-0.02))
+    wrong = {}
+    for margins in (False, True):
+        entries = synthetic.nj_like_stack(tmp / f"dems_{margins}", margins=margins)
+        h = Hfun([e["path"] for e in entries], hmin=HMIN, hmax=HMAX, nprocs=1, base_shape=aoi,
+                 base_shape_crs="EPSG:4326", method="exact")
         h.execution_mode = "serial"
         add_depth_bands(h)
         md = h.meshdata()
@@ -97,15 +105,13 @@ def nodata_margin_seam_exact(tmp: Path) -> CheckResult:
             continue
         utils.reproject(md, CRS.from_epsg(4326))
         c, v = md.coords, np.asarray(md.values).ravel()
-        # Inside the fine tiles (x > 0.30 the depth is shallower than -15 m -> 1000 m band),
-        # away from the AOI edge; nothing there should differ from 1000 m.
-        region = box(0.30, 0.20, 0.70, 0.45).intersection(aoi.buffer(-0.02))
-        inside = np.array([region.contains(p) for p in map(lambda xy: __import__("shapely").geometry.Point(*xy), c)])
-        wrong = int(np.sum(v[inside] != 1000.0))
-        out[method] = {"nodes_in_region": int(inside.sum()), "wrong_nodes": wrong}
+        inside = contains_xy(region, c[:, 0], c[:, 1])
+        wrong[margins] = (int(np.sum(np.abs(v[inside] - 1000.0) > 1.0)), int(inside.sum()))
     if not is_manager():
         return CheckResult("skip", "worker rank")
-    ex = out["exact"]
-    detail = (f"exact: {ex['wrong_nodes']} of {ex['nodes_in_region']} nodes off the 1000 m band; "
-              f"fast: {out['fast']['wrong_nodes']} of {out['fast']['nodes_in_region']}")
-    return CheckResult("fail" if ex["wrong_nodes"] else "pass", detail, out)
+    m = {"control_off_band": wrong[False][0], "margins_off_band": wrong[True][0],
+         "nodes_in_region": wrong[True][1]}
+    if wrong[False][0]:
+        return CheckResult("error", f"control (no margins) not clean: {wrong[False][0]} nodes off band", m)
+    detail = f"{wrong[True][0]} of {wrong[True][1]} nodes off the 1000 m band with nodata margins (0 without)"
+    return CheckResult("fail" if wrong[True][0] else "pass", detail, m)

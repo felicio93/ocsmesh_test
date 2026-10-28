@@ -11,6 +11,10 @@ name: nj
 base_dir: ..                 # paths below are relative to the repo root
 results_root: results/nj
 reports_dir: reports
+report_note: >
+  Inputs differ from the October 2026 runs on ticket #1645: GEBCO is one tile cropped
+  from GEBCO_FILE (was the STOFS split tiles) and MPI rank counts follow the usable tile
+  count, so absolute times are not directly comparable with those 60 runs.
 
 domain:
   shapefile: domain/AOI_domain_FC.shp     # 39.0-40.5 N, 75.0-73.0 W
@@ -68,13 +72,14 @@ tests:
 
 methods: [fast, exact]
 
-# 18 tiles intersect the AOI polygon, so MPI runs use 19 ranks (1 manager + 18 workers).
+# ntasks: auto = one worker rank per usable tile (after the AOI and valid-data
+# filters) + the manager; resolved from the manifest when the scripts are written.
 modes:
   serial:        {nprocs: 1}
   parallel:      {nprocs: 40}
-  mpi_no_pool:   {ntasks: 19, cpus_per_task: 1, nodes: 1}
-  mpi_hybrid:    {ntasks: 6,  cpus_per_task: 7, nodes: 1}
-  mpi_multinode: {ntasks: 19, cpus_per_task: 1, nodes: 2}
+  mpi_no_pool:   {ntasks: auto, cpus_per_task: 1, nodes: 1}
+  mpi_hybrid:    {ntasks: 6,    cpus_per_task: 7, nodes: 1}
+  mpi_multinode: {ntasks: auto, cpus_per_task: 1, nodes: 2}
 
 cluster:                        # Gaea C6
   account: nos-surge
@@ -83,7 +88,7 @@ cluster:                        # Gaea C6
   clusters: c6
   walltime: "16:00:00"
   exclusive: true
-  mail_user: ${OCSMESH_TEST_EMAIL}
+  mail_user: ${OCSMESH_TEST_EMAIL}   # dropped when the variable is not set
   modules: [PrgEnv-intel]
   env:
     LD_LIBRARY_PATH: "${CRAY_LD_LIBRARY_PATH}:${LD_LIBRARY_PATH}"

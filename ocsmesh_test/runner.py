@@ -132,6 +132,7 @@ def run_case(cfg: Config, test_id: int, mode: str, method: str,
             return summary
 
         summary["hfun"] = _stats(meshdata)
+        summary["hfun_crs"] = meshdata.crs.to_string() if meshdata.crs is not None else None
         hfun_path = out_dir / f"hfun_t{test['id']}_{test['name']}_{mode}_{method}.2dm"
         Mesh(meshdata).write(str(hfun_path), overwrite=True, format="2dm")
         summary["hfun_path"] = str(hfun_path)

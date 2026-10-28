@@ -77,6 +77,31 @@ def _load_modules() -> None:
     from . import hfun_nodata, hfun_distributed, mesh_interp, geometry, dateline, utils_misc  # noqa: F401
 
 
+def _start_watchdog(name: str):
+    """Abort every rank if a check runs longer than OCSMESH_CHECK_TIMEOUT seconds.
+
+    A check that raises on one rank before a collective call leaves the
+    other ranks blocked in that collective; without this the job would sit
+    until walltime.
+    """
+    import os
+    import sys
+    import threading
+
+    timeout = float(os.environ.get("OCSMESH_CHECK_TIMEOUT", "1800"))
+
+    def _abort():
+        from mpi4py import MPI
+        sys.stderr.write(f"[ocsmesh-test] check {name} exceeded {timeout:.0f} s; aborting all ranks\n")
+        sys.stderr.flush()
+        MPI.COMM_WORLD.Abort(2)
+
+    timer = threading.Timer(timeout, _abort)
+    timer.daemon = True
+    timer.start()
+    return timer
+
+
 def run(only: Optional[List[str]] = None, skip_mpi: bool = False) -> List[Check]:
     _load_modules()
     active, rank, size = mpi_state()
@@ -89,6 +114,7 @@ def run(only: Optional[List[str]] = None, skip_mpi: bool = False) -> List[Check]
             results.append(c)
             continue
         t0 = time.perf_counter()
+        watchdog = _start_watchdog(c.name) if active else None
         with tempfile.TemporaryDirectory(prefix=f"chk_{c.name.replace('.', '_')}_") as tmp:
             try:
                 with warnings.catch_warnings():
@@ -99,6 +125,8 @@ def run(only: Optional[List[str]] = None, skip_mpi: bool = False) -> List[Check]
                 c.status = "error"
                 c.detail = f"{type(exc).__name__}: {exc}"
                 _logger.debug(traceback.format_exc())
+        if watchdog is not None:
+            watchdog.cancel()
         c.seconds = time.perf_counter() - t0
         if rank == 0:
             _logger.info("%-45s %-5s %.1fs  %s", c.name, c.status.upper(), c.seconds, c.detail[:100])

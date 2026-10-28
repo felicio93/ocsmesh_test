@@ -21,7 +21,9 @@ _logger = logging.getLogger(__name__)
 S3_BASE = "https://noaa-nos-coastal-lidar-pds.s3.amazonaws.com/dem"
 INDEX_BASE = "https://coast.noaa.gov/htdata/raster2/elevation"
 
-# ncei19_n39x50_w074x75_2018v2.tif  ->  SW corner 39.50 N, 74.75 W
+# NCEI/CUDEM tiles are named by their NORTH-WEST (upper-left) corner:
+# ncei19_n39x50_w074x75_2018v2.tif covers 39.25-39.50 N, 74.75-74.50 W
+# (checked against the GeoTIFF header of that tile).
 _TIF_RE = re.compile(
     r"ncei\d+_[nN](\d+)[xX](\d+)_([wWeE])(\d+)[xX](\d+)_\d{4}v\d+\.tif",
     re.IGNORECASE,
@@ -30,8 +32,8 @@ _HREF_RE = re.compile(r'href="([^"]+)"', re.IGNORECASE)
 _INDEX_CACHE: Dict[str, List[str]] = {}
 
 
-def parse_sw_corner(filename: str) -> Optional[Tuple[float, float]]:
-    """Return (lat, lon) of the tile's south-west corner, or None."""
+def parse_nw_corner(filename: str) -> Optional[Tuple[float, float]]:
+    """Return (lat, lon) of the tile's north-west corner, or None."""
     m = _TIF_RE.search(filename)
     if m is None:
         return None
@@ -45,11 +47,11 @@ def parse_sw_corner(filename: str) -> Optional[Tuple[float, float]]:
 
 def tile_box(filename: str, tile_size_deg: float):
     """Shapely box of the tile footprint from its name, or None."""
-    corner = parse_sw_corner(filename)
+    corner = parse_nw_corner(filename)
     if corner is None:
         return None
     lat, lon = corner
-    return box(lon, lat, lon + tile_size_deg, lat + tile_size_deg)
+    return box(lon, lat - tile_size_deg, lon + tile_size_deg, lat)
 
 
 def list_tiles(dataset: str, subfolder: str, timeout: int = 120) -> List[str]:
@@ -80,6 +82,9 @@ def select_tiles(names: Iterable[str], domain, tile_size_deg: float,
     ``selection='polygon'`` tests against the AOI polygon (what the mesh
     needs). ``selection='bbox'`` tests against the AOI bounding box, which
     is the old behaviour that let all-nodata tiles into the size function.
+    Name-derived footprints are only used to decide what to download; the
+    run-time filter (:func:`manifest.raster_paths`) uses the real file
+    bounds and the valid-data fraction.
     """
     target = domain.buffer(buffer_deg) if buffer_deg else domain
     if selection == "bbox":
