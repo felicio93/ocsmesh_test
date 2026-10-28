@@ -128,3 +128,31 @@ def test_report_collect_reads_summaries(tmp_path):
     d.mkdir(parents=True)
     (d / "summary.json").write_text(json.dumps(_row(0, "serial", "exact", 10, 1.0)))
     assert len(report.collect(cfg)) == 1
+
+
+def test_slurm_hfun_only_job_and_ocsmesh_path(tmp_path, monkeypatch):
+    monkeypatch.setenv("OCSMESH_PATH", "/gpfs/x/OCSMesh_clean")
+    cfg = load_config(CONFIGS / "nj_gaea.yaml")
+    monkeypatch.setattr("ocsmesh_test.data.manifest.count_usable", lambda cfg: 18)
+    txt = slurm.render(cfg, 1, "serial", "exact", hfun_only=True)
+    assert "--hfun-only" in txt and "/serial/exact-hfun" in txt
+    assert 'export PYTHONPATH="/gpfs/x/OCSMesh_clean${PYTHONPATH:+:$PYTHONPATH}"' in txt
+    assert "ocsmesh from:" in txt
+    job = slurm.render_job(cfg, "checks_mpi", ["check", "--out", "reports dir"], ntasks=6)
+    assert "#SBATCH --ntasks=6" in job and "mpi4py OK" in job
+    assert "ocsmesh-test check --out 'reports dir'" in job
+    with pytest.raises(ValueError):
+        slurm.render_job(cfg, "bad name;rm", ["check"])
+    monkeypatch.delenv("OCSMESH_PATH")
+    assert "PYTHONPATH" not in slurm.render(load_config(CONFIGS / "nj_gaea.yaml"), 0, "serial", "fast")
+
+
+def test_report_keeps_hfun_only_runs_separate():
+    cfg = load_config(CONFIGS / "local_synthetic.yaml")
+    full = _row(1, "serial", "exact", 1000, 500.0)
+    hf = dict(_row(1, "serial", "exact", 1200, 600.0), hfun_only=True)
+    hf_fast = dict(_row(1, "serial", "fast", 1100, 550.0), hfun_only=True)
+    md = report.render(cfg, [full, hf, hf_fast])
+    assert "| 1 | serial | exact | success" in md
+    assert "| 1 | serial | exact-hfun | success" in md
+    assert "## fast-hfun vs exact-hfun" in md

@@ -104,6 +104,8 @@ def annotate_validity(entries: List[Dict], domain) -> None:
             continue
         with rasterio.open(p) as src:
             fp = box(*src.bounds)
+            e["nodata"] = src.nodata          # None = no declared nodata (clipping fills 0)
+            e["real_bounds"] = list(src.bounds)
             e["intersects_polygon"] = bool(fp.intersects(domain))
             try:
                 data, _ = rasterio.mask.mask(src, [domain], crop=True, filled=False)
@@ -159,10 +161,13 @@ def count_usable(cfg: Config) -> int:
 
 def summary_table(entries: List[Dict]) -> str:
     """Markdown table of the manifest."""
-    rows = ["| # | name | source | available | intersects AOI | valid % |", "|---|---|---|---|---|---|"]
+    rows = ["| # | name | source | available | intersects AOI | valid % | nodata |",
+            "|---|---|---|---|---|---|---|"]
     for e in entries:
         vf = e.get("valid_fraction")
+        nd = e.get("nodata", "?") if "nodata" in e else "?"
         rows.append(
             f"| {e['priority']} | {e['name']} | {e['source']} | {'yes' if e.get('available') else 'no'} | "
-            f"{e.get('intersects_polygon', '?')} | {'' if vf is None else f'{100*vf:.1f}'} |")
+            f"{e.get('intersects_polygon', '?')} | {'' if vf is None else f'{100*vf:.1f}'} | "
+            f"{'NOT DECLARED' if nd is None else nd} |")
     return "\n".join(rows)

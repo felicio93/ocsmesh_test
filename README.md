@@ -39,6 +39,23 @@ ocsmesh-test report -c configs/nj_gaea.yaml --figures    # reports/nj_report_<da
 srun -n 6 ocsmesh-test check                             # MPI checks too
 ```
 
+Other cluster jobs use the same environment block as the benchmark scripts:
+
+```bash
+export OCSMESH_PATH=/path/to/OCSMesh_checkout             # optional: run a specific OCSMesh branch
+ocsmesh-test slurm -c configs/nj_gaea.yaml --test 1 --mode serial parallel --hfun-only --submit
+ocsmesh-test job   -c configs/nj_gaea.yaml --name checks_mpi --ntasks 6 --submit -- check --out reports
+ocsmesh-test job   -c configs/nj_gaea.yaml --name ch_timing --cpus 40 --submit -- \
+    tile-timing -c configs/nj_gaea.yaml --tolerance none 50 --workers 18
+```
+
+`--hfun-only` skips Geom and MeshDriver and writes to `<method>-hfun`, so it never overwrites a
+full run. `tile-timing` clips each tile to the AOI and times `Raster.get_channels`, one tile per
+process, and reports the serial total, the slowest tile and the best possible speedup from
+distributing detection per tile. `ocsmesh_path` (env `OCSMESH_PATH`) puts an OCSMesh checkout
+first on `PYTHONPATH` in every script; the log prints `ocsmesh from: ...` and `summary.json`
+records the path and commit that were used.
+
 Clone the repo on the shared scratch filesystem (`/gpfs/f6/...` on Gaea): results and the
 per-run `TMPDIR` live under it and must be visible to every node. Run on the login node only
 the `data`, `slurm` and `report` steps; `run` is what the SLURM scripts execute. MPI modes

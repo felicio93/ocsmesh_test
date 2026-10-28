@@ -42,10 +42,13 @@ def _index(rows):
 
 
 def render(cfg: Config, rows: List[Dict[str, Any]]) -> str:
+    # size-function-only runs are their own "method" so they never mix with full runs
+    rows = [dict(r, method=f"{r['method']}-hfun") if r.get("hfun_only") else r for r in rows]
     idx = _index(rows)
     tests = [t for t in cfg.tests if any(r["test_id"] == t["id"] for r in rows)]
     modes = [m for m in cfg.modes if any(r["mode"] == m for r in rows)]
-    methods = [m for m in cfg.methods if any(r["method"] == m for r in rows)]
+    candidates = [m for base in cfg.methods for m in (base, f"{base}-hfun")]
+    methods = [m for m in candidates if any(r["method"] == m for r in rows)]
     env = next((r.get("env", {}) for r in rows if r.get("env")), {})
     out: List[str] = []
     w = out.append
@@ -118,19 +121,22 @@ def render(cfg: Config, rows: List[Dict[str, Any]]) -> str:
                 w(f"| {t['id']} {t['name']} | {_fmt(base.get('meshdata_time_s'))} | " + " | ".join(cells) + " |")
             w("")
 
-    if len(methods) > 1 and "exact" in methods and "fast" in methods:
-        w("## fast vs exact (serial if available)")
+    for exact_m, fast_m in (("exact", "fast"), ("exact-hfun", "fast-hfun")):
+        if exact_m not in methods or fast_m not in methods:
+            continue
+        w(f"## {fast_m} vs {exact_m} (serial if available)")
         w("")
-        w("| test | exact meshdata (s) | fast meshdata (s) | fast speedup | exact mesh nodes | fast mesh nodes | diff |")
+        what = "hfun" if exact_m.endswith("-hfun") else "mesh"
+        w(f"| test | exact meshdata (s) | fast meshdata (s) | fast speedup | exact {what} nodes | fast {what} nodes | diff |")
         w("|---|---|---|---|---|---|---|")
         ref_mode = "serial" if "serial" in modes else modes[0]
         for t in tests:
-            e = idx.get((t["id"], ref_mode, "exact"))
-            f = idx.get((t["id"], ref_mode, "fast"))
+            e = idx.get((t["id"], ref_mode, exact_m))
+            f = idx.get((t["id"], ref_mode, fast_m))
             if not e or not f:
                 continue
-            en = e.get("mesh", {}).get("nodes")
-            fn = f.get("mesh", {}).get("nodes")
+            en = e.get(what, {}).get("nodes")
+            fn = f.get(what, {}).get("nodes")
             diff = f"{100 * (fn - en) / en:+.1f}%" if en and fn else ""
             w(f"| {t['id']} {t['name']} | {_fmt(e.get('meshdata_time_s'))} | {_fmt(f.get('meshdata_time_s'))} | "
               f"{_speedup(e.get('meshdata_time_s'), f.get('meshdata_time_s'))} | {_fmt(en)} | {_fmt(fn)} | {diff} |")
@@ -232,7 +238,7 @@ def write_figures(cfg: Config, rows: List[Dict[str, Any]], out_dir: Path,
         plt.colorbar(sc, ax=ax, label="size (m)")
         ax.set_aspect("equal")
         ax.set_title(f"t{r['test_id']} {r['test_name']} | {r['mode']} | {r['method']}")
-        p = out_dir / f"hfun_t{r['test_id']}_{r['mode']}_{r['method']}.png"
+        p = out_dir / f"hfun_t{r['test_id']}_{r['mode']}_{r['method']}{'-hfun' if r.get('hfun_only') else ''}.png"
         fig.savefig(p, dpi=110)
         plt.close(fig)
         paths.append(p)

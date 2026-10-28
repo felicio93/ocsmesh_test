@@ -144,9 +144,11 @@ class Config:
             return int(m.get("cpus_per_task", 1))
         return int(m.get("nprocs", 1))
 
-    def case_dir(self, test_id: int, mode: str, method: str) -> Path:
+    def case_dir(self, test_id: int, mode: str, method: str, hfun_only: bool = False) -> Path:
+        """Results directory of one case; size-function-only runs get ``<method>-hfun``."""
         t = self.test(test_id)
-        return self.results_root / f"test{t['id']}_{t['name']}" / mode / method
+        return (self.results_root / f"test{t['id']}_{t['name']}" / mode
+                / (f"{method}-hfun" if hfun_only else method))
 
 
 _MISSING = object()

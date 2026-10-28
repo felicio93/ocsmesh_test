@@ -44,13 +44,49 @@ def cmd_slurm(args) -> int:
     from .config import load_config
     from . import slurm
     cfg = load_config(args.config)
-    paths = slurm.generate(cfg, tests=args.test, modes=args.mode, methods=args.method)
+    paths = slurm.generate(cfg, tests=args.test, modes=args.mode, methods=args.method,
+                           hfun_only=args.hfun_only)
     for p in paths:
         print(p)
     if args.submit:
         ids = slurm.submit(paths)
         print(f"{len(ids)} job(s) submitted: {' '.join(ids)}")
     return 0
+
+
+def cmd_job(args) -> int:
+    """Wrap any ocsmesh-test command (after --) in a SLURM script."""
+    from .config import load_config
+    from . import slurm
+    cfg = load_config(args.config)
+    cmd = list(args.args)
+    if cmd and cmd[0] == "--":
+        cmd = cmd[1:]
+    if not cmd:
+        raise SystemExit("give the ocsmesh-test command after --, e.g. -- check --out reports")
+    path = slurm.generate_job(cfg, args.name, cmd, ntasks=args.ntasks, cpus=args.cpus,
+                              nodes=args.nodes, walltime=args.walltime)
+    print(path)
+    if args.submit:
+        ids = slurm.submit([path])
+        print(f"{len(ids)} job(s) submitted: {' '.join(ids)}")
+    return 0
+
+
+def cmd_tile_timing(args) -> int:
+    from .config import load_config
+    from . import tiles
+    cfg = load_config(args.config)
+    tols = [None if str(t).lower() == "none" else float(t) for t in args.tolerance]
+    rows = tiles.channel_timing(cfg, tols, workers=args.workers, level=args.level, width=args.width)
+    out_dir = Path(args.out) if args.out else cfg.resolve("reports_dir", "reports")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    stamp = time.strftime("%Y%m%d_%H%M")
+    md = out_dir / f"{cfg.name}_channel_timing_{stamp}.md"
+    md.write_text(tiles.render(rows, f"{cfg.name}: channel detection time per tile"))
+    tiles.write_csv(rows, out_dir / f"{cfg.name}_channel_timing_{stamp}.csv")
+    print(md)
+    return 0 if all(r["status"] == "ok" for r in rows) else 1
 
 
 def cmd_run(args) -> int:
@@ -121,8 +157,30 @@ def main(argv=None) -> int:
     s.add_argument("--test", type=int, nargs="*", default=None)
     s.add_argument("--mode", nargs="*", default=None)
     s.add_argument("--method", nargs="*", default=None)
+    s.add_argument("--hfun-only", action="store_true",
+                   help="size function only (skip Geom and MeshDriver); results go to <method>-hfun")
     s.add_argument("--submit", action="store_true")
     s.set_defaults(fn=cmd_slurm)
+
+    s = sub.add_parser("job", help="wrap another ocsmesh-test command in a SLURM script")
+    s.add_argument("-c", "--config", required=True)
+    s.add_argument("--name", required=True, help="job name ([A-Za-z0-9_.-])")
+    s.add_argument("--ntasks", type=int, default=1, help="MPI ranks (srun -n)")
+    s.add_argument("--cpus", type=int, default=1, help="cpus per task")
+    s.add_argument("--nodes", type=int, default=1)
+    s.add_argument("--walltime", default=None)
+    s.add_argument("--submit", action="store_true")
+    s.add_argument("args", nargs=argparse.REMAINDER, help="-- <ocsmesh-test arguments>")
+    s.set_defaults(fn=cmd_job)
+
+    s = sub.add_parser("tile-timing", help="time channel detection per tile (one tile per process)")
+    s.add_argument("-c", "--config", required=True)
+    s.add_argument("--tolerance", nargs="+", default=["none"], help="e.g. none 50")
+    s.add_argument("--workers", type=int, default=1)
+    s.add_argument("--level", type=float, default=None, help="default: first channels block")
+    s.add_argument("--width", type=float, default=None, help="default: first channels block")
+    s.add_argument("--out", default=None)
+    s.set_defaults(fn=cmd_tile_timing)
 
     s = sub.add_parser("run", help="run one case (called by the SLURM scripts, or locally)")
     s.add_argument("-c", "--config", required=True)

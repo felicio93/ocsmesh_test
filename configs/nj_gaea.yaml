@@ -9,6 +9,9 @@
 
 name: nj
 base_dir: ..                 # paths below are relative to the repo root
+# OCSMesh checkout to put first on PYTHONPATH in the SLURM scripts (unset = use the
+# ocsmesh installed in the conda env). The run summary records which one was imported.
+ocsmesh_path: ${OCSMESH_PATH}
 results_root: results/nj
 reports_dir: reports
 report_note: >

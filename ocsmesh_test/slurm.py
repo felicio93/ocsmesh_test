@@ -1,17 +1,25 @@
-"""Generate and submit SLURM scripts, one per (test, mode, method).
+"""Generate and submit SLURM scripts.
+
+* :func:`generate` writes one script per (test, mode, method) benchmark case.
+* :func:`render_job` writes a script for any other ``ocsmesh-test`` command
+  (regression checks under ``srun``, per-tile timing, ...).
 
 Everything cluster-specific comes from the ``cluster`` and ``modes``
 sections of the config, so the same generator serves Gaea, Hercules or a
-new machine.
+new machine. ``ocsmesh_path`` (optional) puts an OCSMesh checkout first on
+``PYTHONPATH`` so a run can use a specific branch without reinstalling the
+conda environment; the script prints which OCSMesh it imported.
 """
 
 from __future__ import annotations
 
 import logging
+import re
+import shlex
 import stat
 import subprocess
 from pathlib import Path
-from typing import Iterable, List, Optional
+from typing import Iterable, List, Optional, Sequence
 
 from .config import Config
 
@@ -38,37 +46,27 @@ def resolve_ntasks(cfg: Config, mode_cfg) -> int:
         raise RuntimeError("ntasks: auto needs the manifest; run `ocsmesh-test data` first") from exc
 
 
-def render(cfg: Config, test_id: int, mode: str, method: str) -> str:
-    test = cfg.test(test_id)
-    m = cfg.mode(mode)
+def _script(cfg: Config, *, job: str, header: str, nodes: int, ntasks: int, cpus: int,
+            walltime: str, command: str, work_dir: Path, mpi: bool,
+            ntasks_per_node: Optional[int] = None) -> str:
+    """Common SLURM script: resources, environment, OCSMesh selection, launch."""
     cl = cfg.get("cluster", {}) or {}
-    out_dir = cfg.case_dir(test_id, mode, method)
-    tmpdir = out_dir / "tmp"
     logs = log_dir(cfg)
-    job = f"{cfg.name}_t{test['id']}_{mode}_{method[:1]}"
-
-    nodes = int(m.get("nodes", 1))
-    if cfg.is_mpi_mode(mode):
-        ntasks = resolve_ntasks(cfg, m)
-        cpus = int(m.get("cpus_per_task", 1))
-    else:
-        ntasks = 1
-        cpus = int(m.get("nprocs", 1))
-    per_node = m.get("ntasks_per_node")
-    if per_node is None and nodes > 1:
-        per_node = -(-ntasks // nodes)
+    tmpdir = work_dir / "tmp"
+    if ntasks_per_node is None and nodes > 1:
+        ntasks_per_node = -(-ntasks // nodes)
 
     sbatch = [
         f"#SBATCH --job-name={job}",
         f"#SBATCH --nodes={nodes}",
         f"#SBATCH --ntasks={ntasks}",
         f"#SBATCH --cpus-per-task={cpus}",
-        f"#SBATCH --time={m.get('walltime', cl.get('walltime', '08:00:00'))}",
+        f"#SBATCH --time={walltime}",
         f"#SBATCH --output={logs}/{job}_%j.out",
         f"#SBATCH --error={logs}/{job}_%j.err",
     ]
-    if per_node:
-        sbatch.append(f"#SBATCH --ntasks-per-node={per_node}")
+    if ntasks_per_node:
+        sbatch.append(f"#SBATCH --ntasks-per-node={ntasks_per_node}")
     for key in ("account", "partition", "qos", "clusters", "mail-user"):
         val = cl.get(key.replace("-", "_"))
         if val:
@@ -85,54 +83,100 @@ def render(cfg: Config, test_id: int, mode: str, method: str) -> str:
         env_lines.append(f'source "{cl["conda_sh"]}"')
     if cl.get("conda_env"):
         env_lines.append(f'conda activate "{cl["conda_env"]}"')
+    ocsmesh_path = cfg.get("ocsmesh_path")
+    if ocsmesh_path:
+        env_lines.append(f'export PYTHONPATH="{ocsmesh_path}${{PYTHONPATH:+:$PYTHONPATH}}"')
     env_lines += [
         "export OMP_NUM_THREADS=1", "export MKL_NUM_THREADS=1", "export OPENBLAS_NUM_THREADS=1",
         f'export TMPDIR="{tmpdir}"', f'export OCSMESH_SHARED_TMPDIR="{tmpdir}"',
     ]
 
     launcher = cl.get("launcher", "srun")
-    run_cmd = (f"ocsmesh-test run -c '{cfg.path.resolve()}' --test {test['id']} "
-               f"--mode {mode} --method {method}")
-    srun = (f"{launcher} --nodes={nodes} --ntasks={ntasks} --cpus-per-task={cpus} "
-            f"{cl.get('launcher_args', '--cpu-bind=cores')} {run_cmd}")
-    mpi_check = ""
-    if cfg.is_mpi_mode(mode):
-        mpi_check = (f'{launcher} -n 1 python -c "from mpi4py import MPI; '
-                     f'print(\'mpi4py OK:\', MPI.Get_version())"\n')
+    launch = (f"{launcher} --nodes={nodes} --ntasks={ntasks} --cpus-per-task={cpus} "
+              f"{cl.get('launcher_args', '--cpu-bind=cores')} {command}")
+    checks = ['python -c "import ocsmesh, sys; print(\'ocsmesh from:\', ocsmesh.__file__)"']
+    if mpi:
+        checks.append(f'{launcher} -n 1 python -c "from mpi4py import MPI; '
+                      f'print(\'mpi4py OK:\', MPI.Get_version())"')
 
     return f"""#!/bin/bash
-# {cfg.name}: test {test['id']} ({test['name']}) | mode={mode} | method={method}
-# {test.get('description', '')}
+{header}
 {chr(10).join(sbatch)}
 
 set -euo pipefail
 {chr(10).join(env_lines)}
 
-mkdir -p "{out_dir}" "{tmpdir}" "{logs}"
+mkdir -p "{work_dir}" "{tmpdir}" "{logs}"
+cd "{cfg.base_dir}"   # relative paths in arguments resolve against the repo root
 echo "=== {job} job=${{SLURM_JOB_ID:-local}} nodes=${{SLURM_JOB_NUM_NODES:-1}} $(date)"
-{mpi_check}{srun}
+{chr(10).join(checks)}
+{launch}
 echo "=== DONE {job} $(date)"
 """
 
 
+def render(cfg: Config, test_id: int, mode: str, method: str, hfun_only: bool = False) -> str:
+    """Script for one benchmark case."""
+    test = cfg.test(test_id)
+    m = cfg.mode(mode)
+    cl = cfg.get("cluster", {}) or {}
+    suffix = "_h" if hfun_only else ""
+    job = f"{cfg.name}_t{test['id']}_{mode}_{method[:1]}{suffix}"
+    if cfg.is_mpi_mode(mode):
+        ntasks, cpus = resolve_ntasks(cfg, m), int(m.get("cpus_per_task", 1))
+    else:
+        ntasks, cpus = 1, int(m.get("nprocs", 1))
+    command = (f"ocsmesh-test run -c '{cfg.path.resolve()}' --test {test['id']} "
+               f"--mode {mode} --method {method}" + (" --hfun-only" if hfun_only else ""))
+    header = (f"# {cfg.name}: test {test['id']} ({test['name']}) | mode={mode} | method={method}"
+              f"{' | hfun only' if hfun_only else ''}\n# {test.get('description', '')}")
+    return _script(cfg, job=job, header=header, nodes=int(m.get("nodes", 1)), ntasks=ntasks,
+                   cpus=cpus, walltime=m.get("walltime", cl.get("walltime", "08:00:00")),
+                   command=command, work_dir=cfg.case_dir(test_id, mode, method, hfun_only),
+                   mpi=cfg.is_mpi_mode(mode), ntasks_per_node=m.get("ntasks_per_node"))
+
+
+def render_job(cfg: Config, name: str, args: Sequence[str], ntasks: int = 1, cpus: int = 1,
+               nodes: int = 1, walltime: Optional[str] = None) -> str:
+    """Script running ``ocsmesh-test <args>`` with the cluster environment."""
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+", name):
+        raise ValueError(f"job name must be [A-Za-z0-9_.-]+, got {name!r}")
+    cl = cfg.get("cluster", {}) or {}
+    command = "ocsmesh-test " + " ".join(shlex.quote(a) for a in args)
+    return _script(cfg, job=f"{cfg.name}_{name}", header=f"# {cfg.name}: {command}",
+                   nodes=nodes, ntasks=ntasks, cpus=cpus,
+                   walltime=walltime or cl.get("walltime", "08:00:00"), command=command,
+                   work_dir=cfg.results_root / "jobs" / name, mpi=ntasks > 1)
+
+
+def _write(path: Path, text: str) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+    path.chmod(path.stat().st_mode | stat.S_IEXEC)
+    return path
+
+
 def generate(cfg: Config, tests: Optional[Iterable[int]] = None, modes: Optional[Iterable[str]] = None,
-             methods: Optional[Iterable[str]] = None) -> List[Path]:
+             methods: Optional[Iterable[str]] = None, hfun_only: bool = False) -> List[Path]:
     sdir = script_dir(cfg)
-    sdir.mkdir(parents=True, exist_ok=True)
     log_dir(cfg).mkdir(parents=True, exist_ok=True)
     tests = [t["id"] for t in cfg.tests] if tests is None else list(tests)
     modes = list(cfg.modes) if modes is None else list(modes)
     methods = cfg.methods if methods is None else list(methods)
+    suffix = "_hfun" if hfun_only else ""
     paths = []
     for tid in tests:
         for mode in modes:
             for method in methods:
-                p = sdir / f"{cfg.name}_t{tid}_{cfg.test(tid)['name']}_{mode}_{method}.sh"
-                p.write_text(render(cfg, tid, mode, method))
-                p.chmod(p.stat().st_mode | stat.S_IEXEC)
-                paths.append(p)
+                name = f"{cfg.name}_t{tid}_{cfg.test(tid)['name']}_{mode}_{method}{suffix}.sh"
+                paths.append(_write(sdir / name, render(cfg, tid, mode, method, hfun_only)))
     _logger.info("%d scripts written to %s", len(paths), sdir)
     return paths
+
+
+def generate_job(cfg: Config, name: str, args: Sequence[str], **resources) -> Path:
+    log_dir(cfg).mkdir(parents=True, exist_ok=True)
+    return _write(script_dir(cfg) / f"{cfg.name}_job_{name}.sh", render_job(cfg, name, args, **resources))
 
 
 def submit(paths: Iterable[Path]) -> List[str]:

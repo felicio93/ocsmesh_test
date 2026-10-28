@@ -86,7 +86,7 @@ def _stats(meshdata) -> Dict[str, Any]:
 def run_case(cfg: Config, test_id: int, mode: str, method: str,
              out_dir: Optional[Path] = None, hfun_only: bool = False) -> Dict[str, Any]:
     test = cfg.test(test_id)
-    out_dir = Path(out_dir) if out_dir else cfg.case_dir(test_id, mode, method)
+    out_dir = Path(out_dir) if out_dir else cfg.case_dir(test_id, mode, method, hfun_only)
     if IS_MANAGER:
         out_dir.mkdir(parents=True, exist_ok=True)
     nprocs = cfg.nprocs(mode)
