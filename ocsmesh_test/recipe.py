@@ -100,7 +100,9 @@ def _apply_block(hfun, block: str, spec: Any) -> None:
             hfun.add_subtidal_flow_limiter(
                 hmin=float(fl["hmin"]), hmax=float(fl["hmax"]),
                 lower_bound=float(fl["lower"]), upper_bound=float(fl["upper"]),
-                **({"source_index": fl["source_index"]} if fl.get("source_index") is not None else {}))
+                **({"source_index": fl["source_index"]} if fl.get("source_index") is not None else {}),
+                # only passed when set: older OCSMesh has no flat_areas argument
+                **({"flat_areas": fl["flat_areas"]} if fl.get("flat_areas") is not None else {}))
     elif kind == "channels":
         for ch in spec:
             hfun.add_channel(level=float(ch.get("level", 0.0)), width=float(ch["width"]),

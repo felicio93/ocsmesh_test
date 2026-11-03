@@ -62,6 +62,12 @@ refinements:
   flow_limiters:                # add_subtidal_flow_limiter
     - {hmin: 100.0, hmax: 3000.0, lower: -10.0,  upper: 0.0}
     - {hmin: 500.0, hmax: 3000.0, lower: -100.0, upper: -10.0}
+  "flow_limiters:hmin":         # same limiters, flat cells (zero slope) -> limiter hmin (OCSMesh default)
+    - {hmin: 100.0, hmax: 3000.0, lower: -10.0,  upper: 0.0, flat_areas: hmin}
+    - {hmin: 500.0, hmax: 3000.0, lower: -100.0, upper: -10.0, flat_areas: hmin}
+  "flow_limiters:keep":         # same limiters, flat cells keep their size
+    - {hmin: 100.0, hmax: 3000.0, lower: -10.0,  upper: 0.0, flat_areas: keep}
+    - {hmin: 500.0, hmax: 3000.0, lower: -100.0, upper: -10.0, flat_areas: keep}
   channels:                     # add_channel; tolerance=null means no polygon simplification
     - {width: 2000.0, target_size: 500.0, expansion_rate: 0.01, tolerance: null}
 
@@ -72,6 +78,9 @@ tests:
   - {id: 3, name: flow_limiter, description: "+ 2 flow limiters",                       refinements: [depth_bands, contour, flow_limiters]}
   - {id: 4, name: channels,     description: "channels only",                           refinements: [channels]}
   - {id: 5, name: full,         description: "all refinements",                         refinements: [depth_bands, contour, flow_limiters, channels]}
+  # flow limiter flat_areas option (OCSMesh >= the flat_areas commit); test 3 with the option explicit
+  - {id: 6, name: flow_limiter_hmin, description: "test 3, flat cells -> limiter hmin", refinements: [depth_bands, contour, "flow_limiters:hmin"]}
+  - {id: 7, name: flow_limiter_keep, description: "test 3, flat cells keep their size", refinements: [depth_bands, contour, "flow_limiters:keep"]}
 
 methods: [fast, exact]
 
