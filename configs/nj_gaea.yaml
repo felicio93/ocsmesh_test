@@ -81,6 +81,9 @@ tests:
   # flow limiter flat_areas option (OCSMesh >= the flat_areas commit); test 3 with the option explicit
   - {id: 6, name: flow_limiter_hmin, description: "test 3, flat cells -> limiter hmin", refinements: [depth_bands, contour, "flow_limiters:hmin"]}
   - {id: 7, name: flow_limiter_keep, description: "test 3, flat cells keep their size", refinements: [depth_bands, contour, "flow_limiters:keep"]}
+  # Gmsh 'adapt' boundary spacing = size function x bnd_factor (same size function, only the mesh differs)
+  - {id: 8, name: bnd_factor_1,   description: "test 6, bnd_factor 1.0 (default)", refinements: [depth_bands, contour, "flow_limiters:hmin"], mesh_options: {bnd_factor: 1.0}}
+  - {id: 9, name: bnd_factor_1_5, description: "test 6, bnd_factor 1.5",           refinements: [depth_bands, contour, "flow_limiters:hmin"], mesh_options: {bnd_factor: 1.5}}
 
 methods: [fast, exact]
 

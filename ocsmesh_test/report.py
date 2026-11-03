@@ -87,7 +87,9 @@ def render(cfg: Config, rows: List[Dict[str, Any]]) -> str:
     w("| test | name | refinements |")
     w("|---|---|---|")
     for t in tests:
-        w(f"| {t['id']} | {t['name']} | {', '.join(t.get('refinements', [])) or 'none'} |")
+        refs = ', '.join(t.get('refinements', [])) or 'none'
+        opts = ', '.join(f"{k}={v}" for k, v in t.get('mesh_options', {}).items())
+        w(f"| {t['id']} | {t['name']} | {refs}{'; mesh: ' + opts if opts else ''} |")
     w("")
 
     w("## Results")

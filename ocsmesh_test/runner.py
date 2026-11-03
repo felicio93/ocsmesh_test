@@ -139,8 +139,13 @@ def run_case(cfg: Config, test_id: int, mode: str, method: str,
 
         if not hfun_only:
             t0 = time.perf_counter()
+            engine_options = {
+                "bnd_representation": cfg.get("mesh.bnd_representation", "adapt"),
+                **test.get("mesh_options", {}),   # per-test engine options, e.g. bnd_factor
+            }
+            summary["engine_options"] = engine_options
             driver = MeshDriver(geom, hfun, engine_name=cfg.get("mesh.engine", "gmsh"),
-                                bnd_representation=cfg.get("mesh.bnd_representation", "adapt"))
+                                **engine_options)
             final_mesh = driver.run()
             summary["meshdriver_time_s"] = round(time.perf_counter() - t0, 2)
             mesh_path = out_dir / f"mesh_t{test['id']}_{test['name']}_{mode}_{method}.2dm"
