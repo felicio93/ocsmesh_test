@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from .config import Config
+from .timing import STEP_PREFIX
 
 _logger = logging.getLogger(__name__)
 
@@ -156,7 +157,8 @@ def render(cfg: Config, rows: List[Dict[str, Any]]) -> str:
               f"{_speedup(e.get('meshdata_time_s'), f.get('meshdata_time_s'))} | {_fmt(en)} | {_fmt(fn)} | {diff} |")
         w("")
 
-    phases = sorted({k for r in rows for k in (r.get("phase_times_s") or {})})
+    all_labels = {k for r in rows for k in (r.get("phase_times_s") or {})}
+    phases = sorted(k for k in all_labels if not k.startswith(STEP_PREFIX))
     if phases:
         w("## Phase breakdown (s, inclusive and nested; do not add up)")
         w("")
@@ -172,6 +174,36 @@ def render(cfg: Config, rows: List[Dict[str, Any]]) -> str:
                     w(f"| {t['id']} | {mode} | {method} | " +
                       " | ".join(_fmt(pt[p]["seconds"]) if p in pt else "" for p in phases) + " |")
         w("")
+
+    # Sub-steps inside the refinements, serial runs only (the timers do not
+    # see Pool workers, and under MPI only rank 0's share is recorded).
+    if any(k.startswith(STEP_PREFIX) for k in all_labels) and "serial" in modes:
+        w("## Sub-step profile (serial runs; s, inclusive and nested)")
+        w("")
+        w("Times inside the refinements, largest first; `% meshdata` is the share of "
+          "`Hfun.meshdata()`. Steps nest (e.g. `get_multipolygon` inside `get_channels`), "
+          "so the shares do not add up.")
+        w("")
+        for t in tests:
+            for method in methods:
+                r = idx.get((t["id"], "serial", method))
+                if r is None:
+                    continue
+                pt = r.get("phase_times_s") or {}
+                steps = sorted(((k[len(STEP_PREFIX):], v) for k, v in pt.items()
+                                if k.startswith(STEP_PREFIX) and v["seconds"] >= 0.05),
+                               key=lambda kv: -kv[1]["seconds"])
+                if not steps:
+                    continue
+                total = r.get("meshdata_time_s") or 0
+                w(f"**Test {t['id']} {t['name']}, {method}** (meshdata {_fmt(total)} s)")
+                w("")
+                w("| step | s | calls | % meshdata |")
+                w("|---|---|---|---|")
+                for name, v in steps:
+                    share = f"{100 * v['seconds'] / total:.1f}%" if total else ""
+                    w(f"| {name} | {_fmt(v['seconds'])} | {v['calls']:,} | {share} |")
+                w("")
 
     if "serial" in modes:
         w("## Equivalence with serial (same test and method)")
