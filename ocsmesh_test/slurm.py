@@ -127,7 +127,8 @@ def render(cfg: Config, test_id: int, mode: str, method: str, hfun_only: bool = 
     else:
         ntasks, cpus = 1, int(m.get("nprocs", 1))
     command = (f"ocsmesh-test run -c '{cfg.path.resolve()}' --test {test['id']} "
-               f"--mode {mode} --method {method}" + (" --hfun-only" if hfun_only else ""))
+               f"--mode {mode} --method {method}" + (" --hfun-only" if hfun_only else "")
+               + (f" --variant {cfg.variant}" if cfg.variant else ""))
     header = (f"# {cfg.name}: test {test['id']} ({test['name']}) | mode={mode} | method={method}"
               f"{' | hfun only' if hfun_only else ''}\n# {test.get('description', '')}")
     return _script(cfg, job=job, header=header, nodes=int(m.get("nodes", 1)), ntasks=ntasks,

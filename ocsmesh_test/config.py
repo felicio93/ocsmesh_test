@@ -55,6 +55,7 @@ class Config:
     raw: Dict[str, Any]
     path: Path
     unresolved: Dict[str, str] = field(default_factory=dict)
+    variant: Optional[str] = None
     base_dir: Path = field(init=False)
 
     def require(self, dotted: str) -> Any:
@@ -154,10 +155,28 @@ class Config:
 _MISSING = object()
 
 
-def load_config(path: os.PathLike | str) -> Config:
+def load_config(path: os.PathLike | str, variant: Optional[str] = None) -> Config:
+    """Load a config; with ``variant``, for one of its ``dems.variants``.
+
+    A variant run reads the variant's manifest
+    (``<dems.dir>/variants/<variant>/manifest.json``, written by
+    ``ocsmesh-test variant``) and writes to its own results folder
+    (``<results_root>/variants/<variant>``); its name, used for SLURM
+    scripts, jobs and reports, becomes ``<name>_<variant>``.
+    """
     p = Path(path)
     with open(p, encoding="utf-8") as fh:
         raw = yaml.safe_load(fh) or {}
     unresolved: Dict[str, str] = {}
     expanded = _expand(raw, "", unresolved)
-    return Config(raw=expanded, path=p, unresolved=unresolved)
+    if variant:
+        variants = (expanded.get("dems") or {}).get("variants") or {}
+        if variant not in variants:
+            raise KeyError(f"unknown DEM variant {variant!r}; defined: {sorted(variants)}")
+        name = expanded.get("name", p.stem)
+        dems = expanded.setdefault("dems", {})
+        dems["manifest"] = f"{dems.get('dir', 'dems')}/variants/{variant}/manifest.json"
+        expanded["results_root"] = (f"{expanded.get('results_root', f'results/{name}')}"
+                                    f"/variants/{variant}")
+        expanded["name"] = f"{name}_{variant}"
+    return Config(raw=expanded, path=p, unresolved=unresolved, variant=variant)

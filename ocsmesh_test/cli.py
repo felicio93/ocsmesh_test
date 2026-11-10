@@ -44,7 +44,7 @@ def cmd_data(args) -> int:
 def cmd_slurm(args) -> int:
     from .config import load_config
     from . import slurm
-    cfg = load_config(args.config)
+    cfg = load_config(args.config, variant=args.variant)
     paths = slurm.generate(cfg, tests=args.test, modes=args.mode, methods=args.method,
                            hfun_only=args.hfun_only)
     for p in paths:
@@ -94,7 +94,7 @@ def cmd_run(args) -> int:
     _shared_tmpdir()
     from .config import load_config
     from . import runner
-    cfg = load_config(args.config)
+    cfg = load_config(args.config, variant=args.variant)
     out = Path(args.out_dir) if args.out_dir else None
     summary = runner.run_case(cfg, args.test, args.mode, args.method, out_dir=out, hfun_only=args.hfun_only)
     if runner.IS_MANAGER:
@@ -108,7 +108,7 @@ def cmd_run(args) -> int:
 def cmd_report(args) -> int:
     from .config import load_config
     from . import report
-    cfg = load_config(args.config)
+    cfg = load_config(args.config, variant=args.variant)
     rows = report.collect(cfg)
     if not rows:
         print(f"no summary.json under {cfg.results_root}")
@@ -122,6 +122,19 @@ def cmd_report(args) -> int:
     out = out_dir / f"{cfg.name}_report_{time.strftime('%Y%m%d')}.md"
     out.write_text(md)
     print(out)
+    return 0
+
+
+def cmd_variant(args) -> int:
+    from .config import load_config
+    from .data import manifest as manifest_mod
+    from .data import variants
+    base = load_config(args.config)
+    cfg = load_config(args.config, variant=args.variant)
+    entries = variants.build(cfg, base, args.variant)
+    print(manifest_mod.summary_table(entries))
+    print(f"manifest: {manifest_mod.manifest_path(cfg)}")
+    print(f"usable tiles: {manifest_mod.count_usable(cfg)}")
     return 0
 
 
@@ -176,6 +189,7 @@ def main(argv=None) -> int:
 
     s = sub.add_parser("slurm", help="write SLURM scripts (and submit with --submit)")
     s.add_argument("-c", "--config", required=True)
+    s.add_argument("--variant", default=None, help="DEM variant (dems.variants) to use")
     s.add_argument("--test", type=int, nargs="*", default=None)
     s.add_argument("--mode", nargs="*", default=None)
     s.add_argument("--method", nargs="*", default=None)
@@ -206,12 +220,18 @@ def main(argv=None) -> int:
 
     s = sub.add_parser("run", help="run one case (called by the SLURM scripts, or locally)")
     s.add_argument("-c", "--config", required=True)
+    s.add_argument("--variant", default=None, help="DEM variant (dems.variants) to use")
     s.add_argument("--test", type=int, required=True)
     s.add_argument("--mode", default="serial")
     s.add_argument("--method", default="exact")
     s.add_argument("--out-dir", default=None)
     s.add_argument("--hfun-only", action="store_true", help="skip Geom and MeshDriver")
     s.set_defaults(fn=cmd_run)
+
+    s = sub.add_parser("variant", help="write a resampled/split copy of the DEMs (dems.variants)")
+    s.add_argument("-c", "--config", required=True)
+    s.add_argument("--variant", required=True, help="name under dems.variants")
+    s.set_defaults(fn=cmd_variant)
 
     s = sub.add_parser("compare", help="score case directories against a reference case")
     s.add_argument("--ref", required=True, help="reference case dir (holds summary.json)")
@@ -223,6 +243,7 @@ def main(argv=None) -> int:
 
     s = sub.add_parser("report", help="render markdown from summary.json files")
     s.add_argument("-c", "--config", required=True)
+    s.add_argument("--variant", default=None, help="DEM variant (dems.variants) to use")
     s.add_argument("--out", default=None, help="output directory (default: reports/)")
     s.add_argument("--figures", action="store_true", help="also plot hfun fields (needs hfun .2dm files)")
     s.add_argument("--figure-modes", nargs="*", default=None)

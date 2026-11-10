@@ -19,6 +19,11 @@ domain:
 dems:
   dir: dems/synthetic
   synthetic: {scale: 1.0}                   # >1 = coarser tiles, faster runs
+  variants:                                 # `ocsmesh-test variant --variant <name>`
+    res_100m:     {resample_m: 100.0, resampling: average}
+    res_100m_min: {resample_m: 100.0, resampling: min}
+    split_2x2:    {split: 2}
+    split_2x2_ov: {split: 2, overlap_m: 1000.0}
 
 mesh:
   hmin: 50.0

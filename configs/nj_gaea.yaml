@@ -39,6 +39,21 @@ dems:
       dataset: NCEI_ninth_Topobathy_2014_8483
       subfolders: [northeast_sandy, chesapeake_bay]
       tile_size_deg: 0.25
+  # Resampled / split copies of the NCEI tiles (GEBCO is kept as is), built with
+  # `ocsmesh-test variant -c configs/nj_gaea.yaml --variant <name>` and run with
+  # `--variant <name>`; results go to results/nj/variants/<name>. Resolutions are
+  # fractions of hmin (50 m); never upsampled (the ~10 m third tiles stay at 10 m
+  # for res_6m). Split variants have more tiles than ranks: use mpi_19 / mpi_41.
+  variants:
+    res_6m:        {resample_m: 6.25, resampling: average}     # hmin/8
+    res_12m:       {resample_m: 12.5, resampling: average}     # hmin/4
+    res_25m:       {resample_m: 25.0, resampling: average}     # hmin/2
+    res_50m:       {resample_m: 50.0, resampling: average}     # hmin
+    res_12m_min:   {resample_m: 12.5, resampling: min}         # deepest value: keeps creeks open
+    res_25m_min:   {resample_m: 25.0, resampling: min}
+    split_2x2:     {split: 2}
+    split_4x4:     {split: 4}
+    split_4x4_ov2km: {split: 4, overlap_m: 2000.0}             # naive overlap >= channel width
 
 mesh:
   hmin: 50.0
@@ -122,6 +137,8 @@ modes:
   mpi_no_pool:   {ntasks: auto, cpus_per_task: 1, nodes: 1}
   mpi_hybrid:    {ntasks: 6,    cpus_per_task: 7, nodes: 1}
   mpi_multinode: {ntasks: auto, cpus_per_task: 1, nodes: 2}
+  mpi_19:        {ntasks: 19,   cpus_per_task: 1, nodes: 1}   # fixed rank counts, for split variants
+  mpi_41:        {ntasks: 41,   cpus_per_task: 1, nodes: 1}
 
 cluster:                        # Gaea C6
   account: nos-surge

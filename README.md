@@ -73,9 +73,49 @@ valid-data fraction decide which rasters reach OCSMesh.
 - the full results table (status, total / geom / meshdata / driver seconds, hfun and mesh stats),
 - speedup vs serial per method, fast vs exact,
 - per-phase breakdown (contour/channel detection vs dispatch, composite, ...),
+- a sub-step profile of serial runs: what each refinement spends its time on inside a tile
+  (water polygon, buffering, overlay, reprojection, KD-tree build/query, masks, constraints and
+  their rate, raster reads; labels `step:*`; inclusive and nested, so shares do not add up),
 - an equivalence table: every distributed run compared with serial (hfun nodes, hfun mean, mesh
   nodes; flagged above 0.5%),
 - failures, and optional hfun figures (`--figures`).
+
+## Resampling and splitting studies (`variant`, `compare`)
+
+DEM variants are resampled and/or split copies of the NCEI tiles, defined under
+`dems.variants` (see `ocsmesh_test/data/variants.py` for every option):
+
+```bash
+ocsmesh-test variant -c configs/nj_gaea.yaml --variant res_12m       # writes dems/nj/variants/res_12m/
+ocsmesh-test slurm   -c configs/nj_gaea.yaml --variant res_12m --test 4 10 --mode serial --method exact --submit
+```
+
+A variant run reads the variant's manifest and writes to `results/nj/variants/<name>/`; its SLURM
+scripts and reports are named `nj_<name>_...`. Split variants have more tiles than ranks; use the
+fixed-size modes `mpi_19` / `mpi_41` (`ntasks: auto` would ask for one rank per sub-tile). The
+MPI executor hands tasks to idle ranks, so extra tiles queue rather than fail.
+
+Each run also saves the contours and channels it detected (`shapes_<kind>_*.gpkg`).
+`compare` scores runs against a reference run, usually the same test on the original DEMs:
+
+```bash
+ocsmesh-test compare --ref results/nj/test4_channels/serial/exact \
+    --cases results/nj/variants/res_12m/test4_channels/serial/exact \
+            results/nj/variants/res_25m/test4_channels/serial/exact \
+    --labels res_12m res_25m --out reports/variants/t4_resampling.md
+```
+
+| score | how |
+|---|---|
+| size function | both interpolated on a regular grid; relative difference over the refined area (either size below hmax): median, p95, max, share above 10% |
+| mesh | node count difference |
+| channels | IoU of the channel polygons (UTM), reference area missed, area added (km²) |
+| contours | distances between the lines both ways (points every 25 m): median, p95, max (m) |
+| time | meshdata time and speedup against the reference |
+
+Tests 10-18 apply one refinement each (with test 1 depth bands and test 4 channels, every
+refinement has its own test), so time and accuracy can be measured per refinement. Their inputs
+(region, patch, user lines) are in `inputs/`. Constraint `rate`s are per metre (UTM).
 
 ## Regression checks (`ocsmesh-test check`)
 
@@ -109,8 +149,9 @@ collective); only rank 0 reports.
 | `dems.gebco.file`, `dems.ncei[]` | GEBCO file to crop; NCEI datasets/subfolders to scrape and download |
 | `dems.synthetic` | generate the 5-tile synthetic stack instead |
 | `mesh.*` | hmin, hmax, geom_zmin/zmax, engine, bnd_representation |
-| `refinements.*` | named blocks: `depth_bands`, `contour`, `flow_limiters`, `channels`, `region_constraints` |
-| `tests[]` | id, name, description, list of refinement blocks |
+| `refinements.*` | named blocks: `depth_bands`, `contour`, `flow_limiters`, `channels`, `region_constraints`, `topo_bound`, `topo_func`, `courant`, `patches`, `features` (a `kind:label` name reuses a kind, e.g. `"topo_bound:rate"`) |
+| `dems.variants.*` | resampled/split DEM copies: `resample_m`, `resampling`, `split`, `overlap_m`, `sources` |
+| `tests[]` | id, name, description, list of refinement blocks, optional `mesh_options` (extra engine options, e.g. `bnd_factor`) |
 | `methods` | `fast`, `exact` |
 | `modes.*` | `serial`/`parallel` (`nprocs`), `mpi_*` (`ntasks`, `cpus_per_task`, `nodes`) |
 | `cluster.*` | account, partition, qos, clusters, walltime, modules, env, conda, launcher |
@@ -124,9 +165,10 @@ dropped, required ones (the GEBCO file) fail with a message naming the variable.
 ## Layout
 
 ```
-ocsmesh_test/        package: config, data/{ncei,gebco,synthetic,manifest}, recipe, runner, timing, slurm, report, checks/
+ocsmesh_test/        package: config, data/{ncei,gebco,synthetic,manifest,variants}, recipe, runner, timing, slurm, report, compare, checks/
 configs/             nj_gaea.yaml, local_synthetic.yaml
 domain/              NJ AOI shapefile
+inputs/              region, patch and line-feature inputs of the per-refinement tests
 tests/               pytest for the harness (no meshing)
 ```
 
