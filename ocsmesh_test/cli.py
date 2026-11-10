@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import os
 import sys
@@ -124,6 +125,27 @@ def cmd_report(args) -> int:
     return 0
 
 
+def cmd_compare(args) -> int:
+    from . import compare
+    ref = compare.load_case(Path(args.ref))
+    cases = [compare.load_case(Path(c)) for c in args.cases]
+    labels = args.labels or [Path(c["_dir"]).as_posix() for c in cases]
+    if len(labels) != len(cases):
+        print("--labels needs one label per case")
+        return 2
+    results = [compare.compare_case(ref, c, grid=args.grid) for c in cases]
+    md = compare.render(ref, results, labels)
+    print(md)
+    if args.out:
+        out = Path(args.out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(md)
+        out.with_suffix(".json").write_text(json.dumps(
+            {"ref": ref["_dir"], "results": dict(zip(labels, results))}, indent=2))
+        print(f"written: {out} (and {out.with_suffix('.json').name})")
+    return 0
+
+
 def cmd_check(args) -> int:
     _shared_tmpdir()
     if not args.verbose:  # OCSMesh is chatty at INFO; keep the check log readable
@@ -190,6 +212,14 @@ def main(argv=None) -> int:
     s.add_argument("--out-dir", default=None)
     s.add_argument("--hfun-only", action="store_true", help="skip Geom and MeshDriver")
     s.set_defaults(fn=cmd_run)
+
+    s = sub.add_parser("compare", help="score case directories against a reference case")
+    s.add_argument("--ref", required=True, help="reference case dir (holds summary.json)")
+    s.add_argument("--cases", nargs="+", required=True, help="case dirs to score")
+    s.add_argument("--labels", nargs="*", default=None, help="one label per case (default: path)")
+    s.add_argument("--grid", type=int, default=1000, help="size-function grid points per axis")
+    s.add_argument("--out", default=None, help="write markdown here (and a .json next to it)")
+    s.set_defaults(fn=cmd_compare)
 
     s = sub.add_parser("report", help="render markdown from summary.json files")
     s.add_argument("-c", "--config", required=True)

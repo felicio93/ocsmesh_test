@@ -83,6 +83,62 @@ def _stats(meshdata) -> Dict[str, Any]:
     }
 
 
+# collector attribute holding each kind of detected shape
+_DETECTED = {"contours": "_contour_coll", "channels": "_channels_coll"}
+
+
+def capture_detected_shapes(hfun) -> Dict[str, list]:
+    """Keep a copy of the contours and channels the collector detects.
+
+    The collections keep them in temporary files that are deleted right
+    after they are applied, so read them as soon as they are registered:
+    after ``calculate`` (serial detection) or ``set_files`` (files from
+    parallel/MPI workers). Returns the dict that fills up during
+    ``meshdata()``.
+    """
+    captured: Dict[str, list] = {}
+
+    def read(kind, coll):
+        if not IS_MANAGER:
+            return
+        try:
+            captured[kind] = [g.to_crs(4326) for g in coll if len(g) and g.crs is not None]
+        except Exception as exc:  # noqa: BLE001
+            _logger.warning("could not read detected %s: %s", kind, exc)
+
+    for kind, attr in _DETECTED.items():
+        coll = getattr(hfun, attr, None)
+        if coll is None:
+            continue
+        for method in ("calculate", "set_files"):
+            orig = getattr(coll, method, None)
+            if orig is None:
+                continue
+
+            def hooked(*args, _orig=orig, _kind=kind, _coll=coll, **kwargs):
+                out = _orig(*args, **kwargs)
+                read(_kind, _coll)
+                return out
+            setattr(coll, method, hooked)
+    return captured
+
+
+def save_detected_shapes(captured: Dict[str, list], out_dir: Path, stem: str) -> Dict[str, str]:
+    """Write ``shapes_<kind>_<stem>.gpkg`` (EPSG:4326) per kind detected."""
+    import geopandas as gpd
+    import pandas as pd
+
+    written = {}
+    for kind, gdfs in captured.items():
+        if not gdfs:
+            continue
+        gdf = gpd.GeoDataFrame(pd.concat(gdfs, ignore_index=True), crs=4326)
+        path = out_dir / f"shapes_{kind}_{stem}.gpkg"
+        gdf.to_file(path, driver="GPKG")
+        written[kind] = str(path)
+    return written
+
+
 def run_case(cfg: Config, test_id: int, mode: str, method: str,
              out_dir: Optional[Path] = None, hfun_only: bool = False) -> Dict[str, Any]:
     test = cfg.test(test_id)
@@ -122,6 +178,7 @@ def run_case(cfg: Config, test_id: int, mode: str, method: str,
         summary["hfun_build_time_s"] = round(time.perf_counter() - t0, 2)
         summary["execution_mode_effective"] = hfun.execution_mode
 
+        captured = capture_detected_shapes(hfun)
         t0 = time.perf_counter()
         meshdata = hfun.meshdata()
         summary["meshdata_time_s"] = round(time.perf_counter() - t0, 2)
@@ -136,6 +193,11 @@ def run_case(cfg: Config, test_id: int, mode: str, method: str,
         hfun_path = out_dir / f"hfun_t{test['id']}_{test['name']}_{mode}_{method}.2dm"
         Mesh(meshdata).write(str(hfun_path), overwrite=True, format="2dm")
         summary["hfun_path"] = str(hfun_path)
+        try:
+            summary["shape_paths"] = save_detected_shapes(
+                captured, out_dir, f"t{test['id']}_{test['name']}_{mode}_{method}")
+        except Exception as exc:  # noqa: BLE001  never fail a run over this
+            _logger.warning("could not save detected shapes: %s", exc)
 
         if not hfun_only:
             t0 = time.perf_counter()
