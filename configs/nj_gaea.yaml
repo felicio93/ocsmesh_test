@@ -70,6 +70,22 @@ refinements:
     - {hmin: 500.0, hmax: 3000.0, lower: -100.0, upper: -10.0, flat_areas: keep}
   channels:                     # add_channel; tolerance=null means no polygon simplification
     - {width: 2000.0, target_size: 500.0, expansion_rate: 0.01, tolerance: null}
+  # Blocks for the per-refinement profiling tests (10-18). Constraint rates are per
+  # metre (UTM): rate 0.0002 spreads a constraint over ~5 km, across tile edges.
+  topo_bound:                   # add_topo_bound_constraint, cap 800 m in -10..0 m
+    - {value: 800.0, lower: -10.0, upper: 0.0, value_type: max, rate: null}
+  "topo_bound:rate":            # same, relaxed with distance outside the band
+    - {value: 800.0, lower: -10.0, upper: 0.0, value_type: max, rate: 0.0002}
+  topo_func:                    # add_topo_func_constraint, cap 50 m per m of depth + 100 m
+    - {func: {name: depth_linear, a: 50.0, b: 100.0}, lower: -60.0, upper: 0.0, value_type: max, rate: null}
+  courant:                      # add_courant_num_constraint
+    - {upper: 0.9, timestep: 30.0, wave_amplitude: 2.0}
+  region_constraints:           # add_region_constraint, Barnegat Bay box
+    - {shapefile: inputs/nj/region.geojson, value: 300.0, value_type: max, rate: 0.0002}
+  patches:                      # add_patch, Great Bay box
+    - {shapefile: inputs/nj/patch.geojson, target_size: 150.0, expansion_rate: 0.002}
+  features:                     # add_feature, three user lines (river, inlet, offshore track)
+    - {shapefile: inputs/nj/feature_lines.geojson, target_size: 200.0, expansion_rate: 0.002}
 
 tests:
   - {id: 0, name: baseline,     description: "no refinements, hmax everywhere",        refinements: []}
@@ -84,6 +100,17 @@ tests:
   # Gmsh 'adapt' boundary spacing = size function x bnd_factor (same size function, only the mesh differs)
   - {id: 8, name: bnd_factor_1,   description: "test 6, bnd_factor 1.0 (default)", refinements: [depth_bands, contour, "flow_limiters:hmin"], mesh_options: {bnd_factor: 1.0}}
   - {id: 9, name: bnd_factor_1_5, description: "test 6, bnd_factor 1.5",           refinements: [depth_bands, contour, "flow_limiters:hmin"], mesh_options: {bnd_factor: 1.5}}
+  # One refinement per test, for profiling and for scoring resampling/splitting per
+  # refinement (with tests 1 depth_bands and 4 channels; test 5 is the combination).
+  - {id: 10, name: contour_only,      description: "shoreline contour only",            refinements: [contour]}
+  - {id: 11, name: flow_limiter_only, description: "2 flow limiters only",              refinements: ["flow_limiters:hmin"]}
+  - {id: 12, name: topo_bound,        description: "topo bound constraint, no rate",    refinements: [topo_bound]}
+  - {id: 13, name: topo_bound_rate,   description: "topo bound constraint with rate",   refinements: ["topo_bound:rate"]}
+  - {id: 14, name: topo_func,         description: "topo function constraint",          refinements: [topo_func]}
+  - {id: 15, name: courant,           description: "Courant number constraint",         refinements: [courant]}
+  - {id: 16, name: region,            description: "region constraint with rate",       refinements: [region_constraints]}
+  - {id: 17, name: patch,             description: "patch (Great Bay)",                 refinements: [patches]}
+  - {id: 18, name: features,          description: "3 user line features",              refinements: [features]}
 
 methods: [fast, exact]
 

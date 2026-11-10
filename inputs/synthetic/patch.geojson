@@ -1,0 +1,8 @@
+{
+"type": "FeatureCollection",
+"name": "patch",
+"crs": { "type": "name", "properties": { "name": "urn:ogc:def:crs:OGC:1.3:CRS84" } },
+"features": [
+{"type":"Feature","properties":{"name":"p"},"geometry":{"type":"Polygon","coordinates":[[[0.6,0.1],[0.6,0.2],[0.5,0.2],[0.5,0.1],[0.6,0.1]]]}}
+]
+}

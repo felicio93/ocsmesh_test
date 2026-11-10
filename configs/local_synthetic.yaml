@@ -43,6 +43,20 @@ refinements:
     - {hmin: 200.0, hmax: 3000.0, lower: -10.0, upper: 0.0}
   channels:
     - {width: 1000.0, target_size: 300.0, expansion_rate: 0.01, tolerance: 20.0}
+  topo_bound:
+    - {value: 800.0, lower: -10.0, upper: 0.0, value_type: max, rate: null}
+  "topo_bound:rate":
+    - {value: 800.0, lower: -10.0, upper: 0.0, value_type: max, rate: 0.0002}
+  topo_func:
+    - {func: {name: depth_linear, a: 50.0, b: 100.0}, lower: -60.0, upper: 0.0, value_type: max, rate: null}
+  courant:
+    - {upper: 0.9, timestep: 30.0, wave_amplitude: 2.0}
+  region_constraints:
+    - {shapefile: inputs/synthetic/region.geojson, value: 300.0, value_type: max, rate: 0.0002}
+  patches:
+    - {shapefile: inputs/synthetic/patch.geojson, target_size: 150.0, expansion_rate: 0.002}
+  features:
+    - {shapefile: inputs/synthetic/feature_lines.geojson, target_size: 200.0, expansion_rate: 0.002}
 
 tests:
   - {id: 0, name: baseline,    description: "no refinements",            refinements: []}
@@ -50,6 +64,15 @@ tests:
   - {id: 2, name: contour,     description: "+ contour",                 refinements: [depth_bands, contour]}
   - {id: 3, name: channels,    description: "channels only",             refinements: [channels]}
   - {id: 4, name: full,        description: "all refinements",           refinements: [depth_bands, contour, flow_limiters, channels]}
+  - {id: 10, name: contour_only,      description: "contour only",            refinements: [contour]}
+  - {id: 11, name: flow_limiter_only, description: "flow limiter only",       refinements: [flow_limiters]}
+  - {id: 12, name: topo_bound,        description: "topo bound, no rate",     refinements: [topo_bound]}
+  - {id: 13, name: topo_bound_rate,   description: "topo bound with rate",    refinements: ["topo_bound:rate"]}
+  - {id: 14, name: topo_func,         description: "topo function",           refinements: [topo_func]}
+  - {id: 15, name: courant,           description: "Courant number",          refinements: [courant]}
+  - {id: 16, name: region,            description: "region with rate",        refinements: [region_constraints]}
+  - {id: 17, name: patch,             description: "patch",                   refinements: [patches]}
+  - {id: 18, name: features,          description: "user line features",      refinements: [features]}
 
 methods: [fast, exact]
 
