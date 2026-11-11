@@ -54,9 +54,31 @@ def _meshdata(path: str, crs: Optional[str]):
 
 
 def _interpolator(md):
+    """Linear interpolator of a size function on its own triangles.
+
+    Falls back to a Delaunay triangulation of the nodes when the mesh's
+    triangles overlap (matplotlib: "Triangulation is invalid"), as some
+    ``fast`` size-function meshes do. Returns masked arrays either way.
+    """
     import matplotlib.tri as mtri
-    tri = mtri.Triangulation(md.coords[:, 0], md.coords[:, 1], np.asarray(md.tria))
-    return mtri.LinearTriInterpolator(tri, np.asarray(md.values, dtype=float).ravel())
+    xy = np.asarray(md.coords, dtype=float)
+    vals = np.asarray(md.values, dtype=float).ravel()
+    try:
+        tri = mtri.Triangulation(xy[:, 0], xy[:, 1], np.asarray(md.tria))
+        interp = mtri.LinearTriInterpolator(tri, vals)
+        interp(xy[:1, 0], xy[:1, 1])     # builds the trifinder: raises on invalid meshes
+        return interp
+    except RuntimeError as exc:
+        _logger.warning("size-function mesh not usable as is (%s); using a Delaunay "
+                        "triangulation of its nodes", exc)
+    from scipy.interpolate import LinearNDInterpolator
+    uniq, idx = np.unique(xy, axis=0, return_index=True)
+    lin = LinearNDInterpolator(uniq, vals[idx])
+
+    def interp(gx, gy):
+        out = lin(gx, gy)
+        return np.ma.masked_invalid(out)
+    return interp
 
 
 def compare_hfun(ref: Dict[str, Any], other: Dict[str, Any], grid: int = 1000) -> Dict[str, Any]:
