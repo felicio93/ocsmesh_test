@@ -105,6 +105,14 @@ ocsmesh-test compare --ref results/nj/test4_channels/serial/exact \
     --labels res_12m res_25m --out reports/variants/t4_resampling.md
 ```
 
+Or let the config find the runs: every listed test's variant runs (and, with `--with-fast`, the
+original `fast` run) against its original serial `exact` run, one table per test:
+
+```bash
+ocsmesh-test compare -c configs/nj_gaea.yaml --test 1 4 10 --variants res_12m res_25m \
+    --mode serial --method exact --with-fast --out reports/variants/resampling.md
+```
+
 | score | how |
 |---|---|
 | size function | both interpolated on a regular grid; relative difference over the refined area (either size below hmax): median, p95, max, share above 10% |

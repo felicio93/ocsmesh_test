@@ -138,7 +138,57 @@ def cmd_variant(args) -> int:
     return 0
 
 
+def _write_compare(out: Path, md: str, payload) -> None:
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(md)
+    out.with_suffix(".json").write_text(json.dumps(payload, indent=2))
+    print(f"written: {out} (and {out.with_suffix('.json').name})")
+
+
+def _compare_matrix(args) -> int:
+    """compare -c CFG --test ...: each test's variants (and fast) against serial exact."""
+    from . import compare
+    from .config import load_config
+    base = load_config(args.config)
+    tests = args.test or [t["id"] for t in base.get("tests", [])]
+    variants = args.variants or sorted(base.get("dems.variants", {}) or {})
+    sections, payload = [], {}
+    for tid in tests:
+        ref_dir = base.case_dir(tid, args.ref_mode, args.ref_method)
+        if not (ref_dir / "summary.json").exists():
+            print(f"test {tid}: no reference at {ref_dir}; skipped")
+            continue
+        ref = compare.load_case(ref_dir)
+        found = []
+        if args.with_fast:
+            found.append(("original fast", base.case_dir(tid, args.ref_mode, "fast")))
+        for v in variants:
+            vcfg = load_config(args.config, variant=v)
+            for mode in args.mode:
+                for method in args.method:
+                    found.append((f"{v} {mode} {method}", vcfg.case_dir(tid, mode, method)))
+        found = [(lab, d) for lab, d in found if (d / "summary.json").exists()]
+        if not found:
+            print(f"test {tid}: no variant runs found; skipped")
+            continue
+        cases = [compare.load_case(d) for _, d in found]
+        labels = [lab for lab, _ in found]
+        results = [compare.compare_case(ref, c, grid=args.grid) for c in cases]
+        sections.append(compare.render(ref, results, labels))
+        payload[str(tid)] = {"ref": ref["_dir"], "results": dict(zip(labels, results))}
+    md = "\n".join(sections) if sections else "No cases found.\n"
+    print(md)
+    if args.out:
+        _write_compare(Path(args.out), md, payload)
+    return 0
+
+
 def cmd_compare(args) -> int:
+    if args.config:
+        return _compare_matrix(args)
+    if not (args.ref and args.cases):
+        print("compare needs either -c CONFIG (with --test/--variants) or --ref and --cases")
+        return 2
     from . import compare
     ref = compare.load_case(Path(args.ref))
     cases = [compare.load_case(Path(c)) for c in args.cases]
@@ -150,12 +200,7 @@ def cmd_compare(args) -> int:
     md = compare.render(ref, results, labels)
     print(md)
     if args.out:
-        out = Path(args.out)
-        out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(md)
-        out.with_suffix(".json").write_text(json.dumps(
-            {"ref": ref["_dir"], "results": dict(zip(labels, results))}, indent=2))
-        print(f"written: {out} (and {out.with_suffix('.json').name})")
+        _write_compare(Path(args.out), md, {"ref": ref["_dir"], "results": dict(zip(labels, results))})
     return 0
 
 
@@ -234,8 +279,18 @@ def main(argv=None) -> int:
     s.set_defaults(fn=cmd_variant)
 
     s = sub.add_parser("compare", help="score case directories against a reference case")
-    s.add_argument("--ref", required=True, help="reference case dir (holds summary.json)")
-    s.add_argument("--cases", nargs="+", required=True, help="case dirs to score")
+    s.add_argument("-c", "--config", default=None,
+                   help="score DEM variants per test against the original runs (no --ref/--cases)")
+    s.add_argument("--test", type=int, nargs="*", default=None, help="with -c: tests (default: all)")
+    s.add_argument("--variants", nargs="*", default=None, help="with -c: variants (default: all)")
+    s.add_argument("--mode", nargs="*", default=["serial"], help="with -c: variant run modes")
+    s.add_argument("--method", nargs="*", default=["exact"], help="with -c: variant run methods")
+    s.add_argument("--ref-mode", default="serial", help="with -c: reference mode")
+    s.add_argument("--ref-method", default="exact", help="with -c: reference method")
+    s.add_argument("--with-fast", action="store_true",
+                   help="with -c: also score the original fast run (a resampled grid)")
+    s.add_argument("--ref", default=None, help="reference case dir (holds summary.json)")
+    s.add_argument("--cases", nargs="*", default=None, help="case dirs to score")
     s.add_argument("--labels", nargs="*", default=None, help="one label per case (default: path)")
     s.add_argument("--grid", type=int, default=1000, help="size-function grid points per axis")
     s.add_argument("--out", default=None, help="write markdown here (and a .json next to it)")
