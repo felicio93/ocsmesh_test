@@ -146,6 +146,12 @@ def _utm(gdf):
     return gdf.estimate_utm_crs()
 
 
+def _recorded(case: Dict[str, Any]) -> bool:
+    """False for runs made before the harness saved detected shapes: no
+    score rather than a score of zero."""
+    return "shape_paths" in case
+
+
 def _read_shapes(case: Dict[str, Any], kind: str):
     import geopandas as gpd
     path = (case.get("shape_paths") or {}).get(kind)
@@ -157,7 +163,7 @@ def _read_shapes(case: Dict[str, Any], kind: str):
 def compare_channels(ref: Dict[str, Any], other: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     a = _read_shapes(ref, "channels")
     b = _read_shapes(other, "channels")
-    if a is None:
+    if a is None or not _recorded(other):
         return None
     crs = _utm(a)
     ua = _clean_union(a.to_crs(crs))
@@ -207,7 +213,7 @@ def compare_contours(ref: Dict[str, Any], other: Dict[str, Any],
     from scipy.spatial import cKDTree
     a = _read_shapes(ref, "contours")
     b = _read_shapes(other, "contours")
-    if a is None:
+    if a is None or not _recorded(other):
         return None
     crs = _utm(a)
     pa = _line_points(a, crs, step)
