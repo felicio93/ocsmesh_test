@@ -159,6 +159,13 @@ def _compare_matrix(args) -> int:
             print(f"test {tid}: no reference at {ref_dir}; skipped")
             continue
         ref = compare.load_case(ref_dir)
+        time_ref = None
+        if args.time_ref_mode:
+            t_dir = base.case_dir(tid, args.time_ref_mode, args.ref_method)
+            if (t_dir / "summary.json").exists():
+                time_ref = compare.load_case(t_dir)
+            else:
+                print(f"test {tid}: no {args.time_ref_mode} run at {t_dir}; speedup against the reference")
         found = []
         if args.with_fast:
             found.append(("original fast", base.case_dir(tid, args.ref_mode, "fast")))
@@ -173,9 +180,15 @@ def _compare_matrix(args) -> int:
             continue
         cases = [compare.load_case(d) for _, d in found]
         labels = [lab for lab, _ in found]
-        results = [compare.compare_case(ref, c, grid=args.grid) for c in cases]
-        sections.append(compare.render(ref, results, labels))
-        payload[str(tid)] = {"ref": ref["_dir"], "results": dict(zip(labels, results))}
+        if time_ref is not None:
+            found_dirs = {str(d) for _, d in found}
+            if str(Path(time_ref["_dir"])) not in found_dirs:
+                cases.insert(0, time_ref)
+                labels.insert(0, f"original {args.time_ref_mode} {args.ref_method}")
+        results = [compare.compare_case(ref, c, grid=args.grid, time_ref=time_ref) for c in cases]
+        sections.append(compare.render(ref, results, labels, time_ref=time_ref))
+        payload[str(tid)] = {"ref": ref["_dir"], "results": dict(zip(labels, results)),
+                             "time_ref": time_ref["_dir"] if time_ref else None}
     md = "\n".join(sections) if sections else "No cases found.\n"
     print(md)
     if args.out:
@@ -287,6 +300,9 @@ def main(argv=None) -> int:
     s.add_argument("--method", nargs="*", default=["exact"], help="with -c: variant run methods")
     s.add_argument("--ref-mode", default="serial", help="with -c: reference mode")
     s.add_argument("--ref-method", default="exact", help="with -c: reference method")
+    s.add_argument("--time-ref-mode", default=None,
+                   help="with -c: speedup against this mode's original run (e.g. mpi_no_pool); "
+                        "scores stay against the serial reference")
     s.add_argument("--with-fast", action="store_true",
                    help="with -c: also score the original fast run (a resampled grid)")
     s.add_argument("--ref", default=None, help="reference case dir (holds summary.json)")

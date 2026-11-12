@@ -222,9 +222,12 @@ def compare_contours(ref: Dict[str, Any], other: Dict[str, Any],
             "dist_max_m": float(d.max())}
 
 
-def compare_case(ref: Dict[str, Any], other: Dict[str, Any], grid: int = 1000) -> Dict[str, Any]:
+def compare_case(ref: Dict[str, Any], other: Dict[str, Any], grid: int = 1000,
+                 time_ref: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Score ``other`` against ``ref``; the speedup is against ``time_ref`` if given."""
     out: Dict[str, Any] = {"case": other["_dir"], "status": other.get("status")}
-    t_r, t_o = ref.get("meshdata_time_s"), other.get("meshdata_time_s")
+    t_r = (time_ref or ref).get("meshdata_time_s")
+    t_o = other.get("meshdata_time_s")
     out["meshdata_s"] = t_o
     out["speedup"] = (t_r / t_o) if t_r and t_o else None
     m_r, m_o = ref.get("mesh") or {}, other.get("mesh") or {}
@@ -251,11 +254,16 @@ def _f(x, fmt="{:.1f}"):
     return "" if x is None else fmt.format(x)
 
 
-def render(ref: Dict[str, Any], results: List[Dict[str, Any]], labels: List[str]) -> str:
+def render(ref: Dict[str, Any], results: List[Dict[str, Any]], labels: List[str],
+           time_ref: Optional[Dict[str, Any]] = None) -> str:
     lines = [f"# Comparison against `{ref['_dir']}`", "",
              f"Reference: test {ref.get('test_id')} {ref.get('test_name')}, {ref.get('mode')} "
              f"{ref.get('method')}, meshdata {_f(ref.get('meshdata_time_s'))} s, "
-             f"mesh nodes {(ref.get('mesh') or {}).get('nodes', '')}.", "",
+             f"mesh nodes {(ref.get('mesh') or {}).get('nodes', '')}.", ""]
+    if time_ref is not None:
+        lines += [f"Speedup is against `{time_ref['_dir']}` ({time_ref.get('mode')}, meshdata "
+                  f"{_f(time_ref.get('meshdata_time_s'))} s); the scores are against the reference.", ""]
+    lines += [
              "Size function: relative difference over the refined area (either size below hmax); "
              f"`>{100*REL_TOL:.0f}%` is the share of that area differing by more.", "",
              f"`shifted >{100*REL_TOL:.0f}%` is the same share once an edge may move by about "

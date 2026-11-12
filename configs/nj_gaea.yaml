@@ -54,6 +54,11 @@ dems:
     split_2x2:     {split: 2}
     split_4x4:     {split: 4}
     split_4x4_ov2km: {split: 4, overlap_m: 2000.0}             # naive overlap >= channel width
+    split_8x8:     {split: 8}
+    # resampling and splitting combined (resampled first, then split)
+    res_6m_split_4x4:  {resample_m: 6.25, resampling: average, split: 4}
+    res_12m_split_4x4: {resample_m: 12.5, resampling: average, split: 4}
+    res_12m_split_8x8: {resample_m: 12.5, resampling: average, split: 8}
 
 mesh:
   hmin: 50.0
@@ -139,6 +144,7 @@ modes:
   mpi_multinode: {ntasks: auto, cpus_per_task: 1, nodes: 2}
   mpi_19:        {ntasks: 19,   cpus_per_task: 1, nodes: 1}   # fixed rank counts, for split variants
   mpi_41:        {ntasks: 41,   cpus_per_task: 1, nodes: 1}
+  mpi_81:        {ntasks: 81,   cpus_per_task: 1, nodes: 2}   # split variants across 2 nodes
 
 cluster:                        # Gaea C6
   account: nos-surge
