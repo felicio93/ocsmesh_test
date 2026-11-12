@@ -95,6 +95,18 @@ scripts and reports are named `nj_<name>_...`. Split variants have more tiles th
 fixed-size modes `mpi_19` / `mpi_41` (`ntasks: auto` would ask for one rank per sub-tile). The
 MPI executor hands tasks to idle ranks, so extra tiles queue rather than fail.
 
+A variant can instead set OCSMesh options on the original DEMs (nothing to build): `hfun` holds
+collector arguments and `refinements` arguments merged into every item of the named blocks, e.g.
+OCSMesh's own resampling (`resampling_factor`, a fraction of hmin):
+
+```yaml
+    rf05_native: {hfun: {resampling_factor: 0.5},                 # 25 m size-function grid
+                  refinements: {contour: {resampling_factor: native}}}   # contour on the full DEM
+```
+
+Refinement blocks also accept `resampling_factor` / `resampling_method` directly (contour,
+channels, flow_limiters, depth_bands).
+
 Each run also saves the contours and channels it detected (`shapes_<kind>_*.gpkg`).
 `compare` scores runs against a reference run, usually the same test on the original DEMs:
 
