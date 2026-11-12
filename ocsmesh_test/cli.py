@@ -132,7 +132,11 @@ def cmd_variant(args) -> int:
     from .config import is_dem_variant
     base = load_config(args.config)
     cfg = load_config(args.config, variant=args.variant)
-    if not is_dem_variant(variants.variant_spec(base, args.variant)):
+    vspec = variants.variant_spec(base, args.variant)
+    if vspec.get("dems_from"):
+        print(f"{args.variant} uses the DEMs of {vspec['dems_from']}; nothing to build")
+        return 0
+    if not is_dem_variant(vspec):
         print(f"{args.variant} sets OCSMesh options only (hfun_options: "
               f"{cfg.get('hfun_options', {})}); nothing to build, run it with --variant")
         return 0

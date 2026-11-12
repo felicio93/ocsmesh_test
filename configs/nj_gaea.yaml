@@ -76,6 +76,10 @@ dems:
                   refinements: {contour: {resampling_factor: native},
                                 flow_limiters: {resampling_factor: native},
                                 "flow_limiters:hmin": {resampling_factor: native}}}
+    # same DEMs as another variant, own results folder: reruns with an OCSMesh
+    # fix checkout (OCSMESH_PATH=... ocsmesh-test slurm ...)
+    split_4x4_fp: {dems_from: split_4x4}        # composite footprint fix
+    split_8x8_ch: {dems_from: split_8x8}        # get_polygon_channels fix
     # channel detection only (grid stays native)
     ch0125:  {refinements: {channels: {resampling_factor: 0.125}}}
     ch025:   {refinements: {channels: {resampling_factor: 0.25}}}

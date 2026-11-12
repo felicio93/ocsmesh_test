@@ -187,7 +187,9 @@ def load_config(path: os.PathLike | str, variant: Optional[str] = None) -> Confi
     (``<dems.dir>/variants/<variant>/manifest.json``, written by
     ``ocsmesh-test variant``); an option variant (only ``hfun`` and/or
     ``refinements`` keys) uses the original DEMs with those OCSMesh
-    options. Either writes to its own results folder
+    options, and ``dems_from: <variant>`` uses that variant's DEMs (e.g.
+    to rerun it with another OCSMesh checkout). Each writes to its own
+    results folder
     (``<results_root>/variants/<variant>``); its name, used for SLURM
     scripts, jobs and reports, becomes ``<name>_<variant>``.
     """
@@ -203,7 +205,10 @@ def load_config(path: os.PathLike | str, variant: Optional[str] = None) -> Confi
         name = expanded.get("name", p.stem)
         dems = expanded.setdefault("dems", {})
         vspec = variants[variant] or {}
-        if is_dem_variant(vspec):
+        if vspec.get("dems_from"):   # another variant's DEMs, own results folder
+            dems["manifest"] = (f"{dems.get('dir', 'dems')}/variants/"
+                                f"{vspec['dems_from']}/manifest.json")
+        elif is_dem_variant(vspec):
             dems["manifest"] = f"{dems.get('dir', 'dems')}/variants/{variant}/manifest.json"
         else:   # the original DEMs (the default manifest name uses the config name)
             dems.setdefault("manifest", f"{dems.get('dir', 'dems')}/manifest_{name}.json")
