@@ -69,6 +69,7 @@ def build_hfun(cfg: Config, raster_paths: List[str], domain, domain_crs: str,
         base_shape=domain,
         base_shape_crs=domain_crs,
         method=method,
+        **(cfg.get("hfun_options", {}) or {}),
     )
     with warnings.catch_warnings(record=True):
         warnings.simplefilter("always")
@@ -122,6 +123,17 @@ def _shape(cfg: Config, spec: Dict[str, Any], areal: bool):
     return shape, gdf.crs
 
 
+def _resampling(spec: Dict[str, Any]) -> Dict[str, Any]:
+    """``resampling_factor``/``resampling_method`` of a block item, only
+    when set (older OCSMesh has no such arguments)."""
+    out = {}
+    for key in ("resampling_factor", "resampling_method"):
+        if spec.get(key) is not None:
+            value = spec[key]
+            out[key] = value if isinstance(value, str) else float(value)
+    return out
+
+
 def _rate(spec: Dict[str, Any], key: str = "rate"):
     value = spec.get(key)
     return None if value is None else float(value)
@@ -138,11 +150,11 @@ def _apply_block(hfun, block: str, spec: Any, cfg: Config) -> None:
                 kw["upper_bound"] = float(band["upper"])
             if band.get("source_index") is not None:
                 kw["source_index"] = band["source_index"]
-            hfun.add_constant_value(**kw)
+            hfun.add_constant_value(**kw, **_resampling(band))
     elif kind == "contour":
         for c in (spec if isinstance(spec, list) else [spec]):
             hfun.add_contour(level=float(c["level"]), expansion_rate=float(c["expansion_rate"]),
-                             target_size=float(c["target_size"]))
+                             target_size=float(c["target_size"]), **_resampling(c))
     elif kind == "flow_limiters":
         for fl in spec:
             hfun.add_subtidal_flow_limiter(
@@ -150,13 +162,14 @@ def _apply_block(hfun, block: str, spec: Any, cfg: Config) -> None:
                 lower_bound=float(fl["lower"]), upper_bound=float(fl["upper"]),
                 **({"source_index": fl["source_index"]} if fl.get("source_index") is not None else {}),
                 # only passed when set: older OCSMesh has no flat_areas argument
-                **({"flat_areas": fl["flat_areas"]} if fl.get("flat_areas") is not None else {}))
+                **({"flat_areas": fl["flat_areas"]} if fl.get("flat_areas") is not None else {}),
+                **_resampling(fl))
     elif kind == "channels":
         for ch in spec:
             hfun.add_channel(level=float(ch.get("level", 0.0)), width=float(ch["width"]),
                              target_size=float(ch["target_size"]),
                              expansion_rate=ch.get("expansion_rate"),
-                             tolerance=ch.get("tolerance"))
+                             tolerance=ch.get("tolerance"), **_resampling(ch))
     elif kind == "region_constraints":
         for rc in spec:
             shape, crs = _shape(cfg, rc, areal=True)

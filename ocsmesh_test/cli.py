@@ -129,8 +129,13 @@ def cmd_variant(args) -> int:
     from .config import load_config
     from .data import manifest as manifest_mod
     from .data import variants
+    from .config import is_dem_variant
     base = load_config(args.config)
     cfg = load_config(args.config, variant=args.variant)
+    if not is_dem_variant(variants.variant_spec(base, args.variant)):
+        print(f"{args.variant} sets OCSMesh options only (hfun_options: "
+              f"{cfg.get('hfun_options', {})}); nothing to build, run it with --variant")
+        return 0
     entries = variants.build(cfg, base, args.variant)
     print(manifest_mod.summary_table(entries))
     print(f"manifest: {manifest_mod.manifest_path(cfg)}")

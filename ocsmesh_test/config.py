@@ -155,12 +155,39 @@ class Config:
 _MISSING = object()
 
 
+_DEM_KEYS = ("resample_m", "split", "overlap_m", "resampling", "sources")
+
+
+def is_dem_variant(vspec: Dict[str, Any]) -> bool:
+    """True when a variant writes its own DEM copies (``ocsmesh-test variant``)."""
+    return any(k in (vspec or {}) for k in _DEM_KEYS)
+
+
+def _apply_option_variant(expanded: Dict[str, Any], vspec: Dict[str, Any]) -> None:
+    """OCSMesh options of a variant: ``hfun`` (collector arguments, e.g.
+    ``resampling_factor``) and ``refinements`` (arguments merged into every
+    item of the named refinement blocks)."""
+    if vspec.get("hfun"):
+        expanded["hfun_options"] = {**(expanded.get("hfun_options") or {}), **vspec["hfun"]}
+    blocks = expanded.get("refinements") or {}
+    for block, extra in (vspec.get("refinements") or {}).items():
+        if block not in blocks:
+            raise KeyError(f"variant refinement override for unknown block {block!r}")
+        spec = blocks[block]
+        if isinstance(spec, list):
+            blocks[block] = [{**item, **extra} for item in spec]
+        else:
+            blocks[block] = {**spec, **extra}
+
+
 def load_config(path: os.PathLike | str, variant: Optional[str] = None) -> Config:
     """Load a config; with ``variant``, for one of its ``dems.variants``.
 
-    A variant run reads the variant's manifest
+    A DEM variant run reads the variant's manifest
     (``<dems.dir>/variants/<variant>/manifest.json``, written by
-    ``ocsmesh-test variant``) and writes to its own results folder
+    ``ocsmesh-test variant``); an option variant (only ``hfun`` and/or
+    ``refinements`` keys) uses the original DEMs with those OCSMesh
+    options. Either writes to its own results folder
     (``<results_root>/variants/<variant>``); its name, used for SLURM
     scripts, jobs and reports, becomes ``<name>_<variant>``.
     """
@@ -175,7 +202,12 @@ def load_config(path: os.PathLike | str, variant: Optional[str] = None) -> Confi
             raise KeyError(f"unknown DEM variant {variant!r}; defined: {sorted(variants)}")
         name = expanded.get("name", p.stem)
         dems = expanded.setdefault("dems", {})
-        dems["manifest"] = f"{dems.get('dir', 'dems')}/variants/{variant}/manifest.json"
+        vspec = variants[variant] or {}
+        if is_dem_variant(vspec):
+            dems["manifest"] = f"{dems.get('dir', 'dems')}/variants/{variant}/manifest.json"
+        else:   # the original DEMs (the default manifest name uses the config name)
+            dems.setdefault("manifest", f"{dems.get('dir', 'dems')}/manifest_{name}.json")
+        _apply_option_variant(expanded, vspec)
         expanded["results_root"] = (f"{expanded.get('results_root', f'results/{name}')}"
                                     f"/variants/{variant}")
         expanded["name"] = f"{name}_{variant}"

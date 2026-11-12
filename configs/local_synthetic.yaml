@@ -24,6 +24,11 @@ dems:
     res_100m_min: {resample_m: 100.0, resampling: min}
     split_2x2:    {split: 2}
     split_2x2_ov: {split: 2, overlap_m: 1000.0}
+    rf1:     {hfun: {resampling_factor: 1.0}}
+    rf1_native: {hfun: {resampling_factor: 1.0},
+                 refinements: {contour: {resampling_factor: native},
+                               flow_limiters: {resampling_factor: native}}}
+    ch1:     {refinements: {channels: {resampling_factor: 1.0}}}
 
 mesh:
   hmin: 50.0
