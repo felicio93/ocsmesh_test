@@ -13,7 +13,11 @@ size function
     *refined area*, where either size is below ``hmax``: median, 95th
     percentile, maximum and the share of that area differing by more than
     10%. Over the whole domain most of the area sits at ``hmax`` in both,
-    which would hide the differences.
+    which would hide the differences. Where the size jumps between levels
+    (bands, channels, limiters) an edge that moves by one triangle flips a
+    whole strip, so a *shift-tolerant* share is also given: a point counts
+    only if its size is more than 10% outside the range the other size
+    function takes within ``SHIFT_M`` (rounded up to whole grid cells).
 mesh
     Node and element counts against the reference.
 channels
@@ -39,6 +43,7 @@ import numpy as np
 _logger = logging.getLogger(__name__)
 
 REL_TOL = 0.10          # "differs" threshold for the size function
+SHIFT_M = 250.0         # edge shift tolerated by the shift-tolerant score (m)
 
 
 def load_case(case_dir: Path) -> Dict[str, Any]:
@@ -81,26 +86,57 @@ def _interpolator(md):
     return interp
 
 
-def compare_hfun(ref: Dict[str, Any], other: Dict[str, Any], grid: int = 1000) -> Dict[str, Any]:
+def _shift_tolerant_error(h_a, h_b, k):
+    """Relative distance of ``h_b`` from the range of ``h_a`` within ``k`` cells.
+
+    Zero where ``h_b`` matches some value of ``h_a`` close by, so an edge
+    between two size levels that moved by up to ``k`` cells does not count.
+    NaN cells (outside either mesh) are ignored.
+    """
+    from scipy.ndimage import maximum_filter, minimum_filter
+    size = 2 * k + 1
+    lo = minimum_filter(np.where(np.isnan(h_a), np.inf, h_a), size=size, mode="nearest")
+    hi = maximum_filter(np.where(np.isnan(h_a), -np.inf, h_a), size=size, mode="nearest")
+    with np.errstate(invalid="ignore"):
+        err = np.maximum.reduce([np.zeros_like(h_b), h_b - hi, lo - h_b]) / h_a
+    return err
+
+
+def compare_hfun(ref: Dict[str, Any], other: Dict[str, Any], grid: int = 1000,
+                 shift_m: float = SHIFT_M) -> Dict[str, Any]:
     md_r = _meshdata(ref["hfun_path"], ref.get("hfun_crs"))
     md_o = _meshdata(other["hfun_path"], other.get("hfun_crs"))
     xmin, ymin = md_r.coords.min(axis=0)
     xmax, ymax = md_r.coords.max(axis=0)
     gx, gy = np.meshgrid(np.linspace(xmin, xmax, grid), np.linspace(ymin, ymax, grid))
-    h_r = _interpolator(md_r)(gx, gy)
-    h_o = _interpolator(md_o)(gx, gy)
-    valid = ~(np.ma.getmaskarray(h_r) | np.ma.getmaskarray(h_o))
-    h_r, h_o = np.ma.getdata(h_r)[valid], np.ma.getdata(h_o)[valid]
+    H_r = np.ma.filled(np.ma.masked_invalid(_interpolator(md_r)(gx, gy)).astype(float), np.nan)
+    H_o = np.ma.filled(np.ma.masked_invalid(_interpolator(md_o)(gx, gy)).astype(float), np.nan)
+    valid = ~(np.isnan(H_r) | np.isnan(H_o))
+    h_r, h_o = H_r[valid], H_o[valid]
     hmax = float(np.max(np.asarray(md_r.values)))
     refined = np.minimum(h_r, h_o) < 0.999 * hmax
+    # grid cell size in metres (geographic size functions: degrees at mid latitude)
+    dx, dy = (xmax - xmin) / (grid - 1), (ymax - ymin) / (grid - 1)
+    if abs(xmax) <= 360 and abs(ymax) <= 90:
+        lat = np.radians(0.5 * (ymin + ymax))
+        dx, dy = dx * 111_320.0 * np.cos(lat), dy * 110_540.0
+    cell_m = float(max(dx, dy))
+    k = max(1, int(np.ceil(shift_m / cell_m)))
     out: Dict[str, Any] = {"grid_points": int(valid.sum()),
-                           "refined_share": float(refined.mean()) if valid.any() else 0.0}
+                           "refined_share": float(refined.mean()) if valid.any() else 0.0,
+                           "cell_m": cell_m, "shift_cells": k}
     if refined.any():
         rel = np.abs(h_o[refined] - h_r[refined]) / h_r[refined]
+        # both ways: variant vs reference neighbourhood, reference vs variant neighbourhood
+        e1 = _shift_tolerant_error(H_r, H_o, k)[valid][refined]
+        e2 = (_shift_tolerant_error(H_o, H_r, k)[valid][refined] * h_o[refined] / h_r[refined])
+        shift = np.nan_to_num(np.maximum(e1, e2), nan=0.0, posinf=0.0)
         out.update({"rel_median": float(np.median(rel)),
                     "rel_p95": float(np.percentile(rel, 95)),
                     "rel_max": float(rel.max()),
                     "share_over_tol": float((rel > REL_TOL).mean()),
+                    "shift_p95": float(np.percentile(shift, 95)),
+                    "shift_share_over_tol": float((shift > REL_TOL).mean()),
                     "mean_ref": float(h_r[refined].mean()),
                     "mean_other": float(h_o[refined].mean())})
     return out
@@ -124,17 +160,36 @@ def compare_channels(ref: Dict[str, Any], other: Dict[str, Any]) -> Optional[Dic
     if a is None:
         return None
     crs = _utm(a)
-    ua = a.to_crs(crs).union_all()
-    ub = b.to_crs(crs).union_all() if b is not None and len(b) else None
+    ua = _clean_union(a.to_crs(crs))
+    ub = _clean_union(b.to_crs(crs)) if b is not None and len(b) else None
     area_a = ua.area
     if ub is None or ub.is_empty:
         return {"ref_km2": area_a / 1e6, "iou": 0.0, "missed_km2": area_a / 1e6, "added_km2": 0.0}
-    inter = ua.intersection(ub).area
-    union = ua.union(ub).area
+    try:
+        inter = ua.intersection(ub).area
+        union = ua.union(ub).area
+    except Exception:  # noqa: BLE001 - GEOS topology errors on near-coincident edges
+        import shapely
+        ua, ub = shapely.set_precision(ua, 0.01), shapely.set_precision(ub, 0.01)
+        inter = ua.intersection(ub).area
+        union = ua.union(ub).area
     return {"ref_km2": area_a / 1e6,
             "iou": inter / union if union else 1.0,
             "missed_km2": max(area_a - inter, 0.0) / 1e6,
             "added_km2": max(ub.area - inter, 0.0) / 1e6}
+
+
+def _clean_union(gdf):
+    """Union of the polygons after repairing invalid ones (1 cm grid if needed)."""
+    import shapely
+    geoms = shapely.make_valid(gdf.geometry.values)
+    polys = [g for g in shapely.get_parts(geoms) if g.geom_type in ("Polygon", "MultiPolygon")]
+    if not polys:
+        return shapely.Polygon()
+    try:
+        return shapely.union_all(polys)
+    except Exception:  # noqa: BLE001
+        return shapely.union_all(shapely.set_precision(polys, 0.01))
 
 
 def _line_points(gdf, crs, step: float) -> np.ndarray:
@@ -203,9 +258,13 @@ def render(ref: Dict[str, Any], results: List[Dict[str, Any]], labels: List[str]
              f"mesh nodes {(ref.get('mesh') or {}).get('nodes', '')}.", "",
              "Size function: relative difference over the refined area (either size below hmax); "
              f"`>{100*REL_TOL:.0f}%` is the share of that area differing by more.", "",
+             f"`shifted >{100*REL_TOL:.0f}%` is the same share once an edge may move by about "
+             f"{SHIFT_M:.0f} m (rounded up to grid cells; the size is compared with the range of the other size function "
+             "around each point), so it counts real changes of size, not edges that moved slightly.", "",
              "| case | status | meshdata (s) | speedup | mesh nodes (diff) | hfun median | hfun p95 | hfun max | "
-             f"hfun >{100*REL_TOL:.0f}% | channels IoU | missed / added (km²) | contour p50 / p95 / max (m) |",
-             "|---|---|---|---|---|---|---|---|---|---|---|---|"]
+             f"hfun >{100*REL_TOL:.0f}% | shifted >{100*REL_TOL:.0f}% | channels IoU | missed / added (km²) | "
+             "contour p50 / p95 / max (m) |",
+             "|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for label, r in zip(labels, results):
         h = r.get("hfun") or {}
         ch = r.get("channels") or {}
@@ -216,12 +275,13 @@ def render(ref: Dict[str, Any], results: List[Dict[str, Any]], labels: List[str]
             f"| {label} | {r.get('status')} | {_f(r.get('meshdata_s'))} | {_f(r.get('speedup'), '{:.2f}x')} | "
             f"{nodes} | {_f(h.get('rel_median'), '{:.1%}')} | {_f(h.get('rel_p95'), '{:.1%}')} | "
             f"{_f(h.get('rel_max'), '{:.0%}')} | {_f(h.get('share_over_tol'), '{:.1%}')} | "
+            f"{_f(h.get('shift_share_over_tol'), '{:.1%}')} | "
             f"{_f(ch.get('iou'), '{:.3f}')} | "
             f"{_f(ch.get('missed_km2'), '{:.2f}')}{' / ' if ch else ''}{_f(ch.get('added_km2'), '{:.2f}')} | "
             f"{_f(co.get('dist_median_m'))}{' / ' if 'dist_median_m' in co else ''}"
             f"{_f(co.get('dist_p95_m'))}{' / ' if 'dist_median_m' in co else ''}{_f(co.get('dist_max_m'))} |")
         errs = [f"{k}: {v}" for k, v in r.items() if k.endswith("_error")]
         if errs:
-            lines.append(f"| ↳ {label} errors | " + "; ".join(errs) + " |" + " |" * 10)
+            lines.append(f"| ↳ {label} errors | " + "; ".join(errs) + " |" + " |" * 11)
     lines.append("")
     return "\n".join(lines)
