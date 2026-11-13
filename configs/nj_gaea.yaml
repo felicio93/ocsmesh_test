@@ -83,6 +83,8 @@ dems:
     # channel detection only (grid stays native)
     ch0125:  {refinements: {channels: {resampling_factor: 0.125}}}
     ch025:   {refinements: {channels: {resampling_factor: 0.25}}}
+    # resampling off on the resampling branch: must match the reference
+    rf_off:  {hfun: {resampling_factor: null}}
     # channels detected on 6.25 m pixels, sizes on a coarse grid
     ch0125_rf05: {hfun: {resampling_factor: 0.5},
                   refinements: {channels: {resampling_factor: 0.125}}}
