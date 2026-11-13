@@ -27,6 +27,21 @@ def _parts(geom, crs, top):
     return gdf, gdf.head(top)
 
 
+def _whole(src, other):
+    """Polygons of ``src`` that ``other`` does not touch at all: whole
+    channels missed (or added), not edges that moved."""
+    import numpy as np
+    import shapely
+    polys = np.array([p for p in shapely.get_parts(src) if p.area > 0])
+    if not len(polys):
+        return 0.0, 0, 0, (0.0, 0.0)
+    shapely.prepare(other)
+    alone = polys[~shapely.intersects(other, polys)]
+    areas = shapely.area(alone)
+    sizes = (float(np.median(areas)), float(np.percentile(areas, 90))) if len(alone) else (0.0, 0.0)
+    return float(areas.sum()) / 1e6, len(alone), len(polys), sizes
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("ref")
@@ -65,6 +80,11 @@ def main(argv=None) -> int:
         print(f"\n{name}: missed {miss.area / 1e6:.2f} km2 in {len(all_miss)} pieces, "
               f"added {add.area / 1e6:.2f} km2 in {len(all_add)} pieces; largest missed:")
         print(top[["km2", "lon", "lat"]].to_string(index=False, float_format="{:.3f}".format))
+        for label, src, other in (("reference channels with no overlap", ua, ub),
+                                  ("run channels with no overlap", ub, ua)):
+            km2, n, total, sizes = _whole(src, other)
+            print(f"  {label}: {n} of {total} polygons, {km2:.2f} km2"
+                  f" (median {sizes[0]:.0f} m2, p90 {sizes[1]:.0f} m2)")
 
     if len(missed) > 1:
         print("\nshared missed area (km2, and share of the smaller one):")
