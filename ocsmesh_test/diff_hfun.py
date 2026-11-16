@@ -53,6 +53,10 @@ def main(argv=None) -> int:
         shift = np.where(refined, np.fmax(e1, e2), np.nan)
 
     crs = ref.get("hfun_crs") or "EPSG:4326"
+    if abs(xmax) <= 360 and abs(ymax) <= 90 and "4326" not in str(crs):
+        print(f"recorded size-function CRS {crs} but coordinates are degrees: using EPSG:4326")
+        crs = "EPSG:4326"
+    print(f"size-function CRS {crs}, bounds {xmin:.4f} {ymin:.4f} {xmax:.4f} {ymax:.4f}")
     half = 0.5 * dx
     transform = from_bounds(xmin - half, ymin - half, xmax + half, ymax + half, n, n)
     out = Path(args.out)
@@ -77,6 +81,12 @@ def main(argv=None) -> int:
         from scipy.ndimage import distance_transform_edt
         mask = rasterize(((g, 1) for g in chan.to_crs(crs).geometry), out_shape=(n, n),
                          transform=transform, fill=0, all_touched=True).astype(bool)
+        cb = chan.to_crs(crs).total_bounds
+        print(f"reference channels: {len(chan)} shapes, bounds {cb[0]:.4f} {cb[1]:.4f} "
+              f"{cb[2]:.4f} {cb[3]:.4f} (in {crs}), {int(mask.sum())} grid cells")
+        if not mask.any():
+            print("the channels do not overlap the grid: no split by distance")
+            return 0
         dist = distance_transform_edt(~mask) * cell_m
         print("cells over the threshold by distance from the reference channels:")
         for lo, hi in ((0, 1), (1, 250), (250, 500), (500, 1000), (1000, 1e12)):
