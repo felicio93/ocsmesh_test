@@ -90,6 +90,14 @@ dems:
                   refinements: {channels: {resampling_factor: 0.125}}}
     ch0125_rf1:  {hfun: {resampling_factor: 1.0},
                   refinements: {channels: {resampling_factor: 0.125}}}
+    # OCSMesh splitting (split_size, OCSMesh >= PR A): tiles over split_size
+    # pixels (3 m) cut into windows with a halo; 4100 -> 2x2 per 0.25 deg tile,
+    # 2700 -> 3x3. More windows than tiles: use mpi_41 / mpi_81_1n.
+    sp4100:      {hfun: {split_size: 4100}}
+    ch0125_rf1_sp4100: {hfun: {resampling_factor: 1.0, split_size: 4100},
+                        refinements: {channels: {resampling_factor: 0.125}}}
+    ch0125_rf1_sp2700: {hfun: {resampling_factor: 1.0, split_size: 2700},
+                        refinements: {channels: {resampling_factor: 0.125}}}
 
 mesh:
   hmin: 50.0
@@ -176,6 +184,7 @@ modes:
   mpi_19:        {ntasks: 19,   cpus_per_task: 1, nodes: 1}   # fixed rank counts, for split variants
   mpi_41:        {ntasks: 41,   cpus_per_task: 1, nodes: 1}
   mpi_81:        {ntasks: 81,   cpus_per_task: 1, nodes: 2}   # split variants across 2 nodes
+  mpi_81_1n:     {ntasks: 81,   cpus_per_task: 1, nodes: 1}   # split variants on one node
 
 cluster:                        # Gaea C6
   account: nos-surge
