@@ -52,7 +52,10 @@ ocsmesh-test job   -c configs/nj_gaea.yaml --name ch_timing --cpus 40 --submit -
 `--hfun-only` skips Geom and MeshDriver and writes to `<method>-hfun`, so it never overwrites a
 full run. `tile-timing` clips each tile to the AOI and times `Raster.get_channels`, one tile per
 process, and reports the serial total, the slowest tile and the best possible speedup from
-distributing detection per tile. `ocsmesh_path` (env `OCSMESH_PATH`) puts an OCSMesh checkout
+distributing detection per tile. `diag-split -c ... --variant <split variant> --test 4 --lon X
+--lat Y` runs the channel detection of the tile(s) at a point, serially, unsplit and split, and
+prints the channel area near the point after each step (detection, clip to the window core, size
+cutoff), to find the step where a split run loses channels. `ocsmesh_path` (env `OCSMESH_PATH`) puts an OCSMesh checkout
 first on `PYTHONPATH` in every script; the log prints `ocsmesh from: ...` and `summary.json`
 records the path and commit that were used.
 

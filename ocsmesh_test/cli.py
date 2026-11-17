@@ -74,6 +74,19 @@ def cmd_job(args) -> int:
     return 0
 
 
+def cmd_diag_split(args) -> int:
+    from .config import load_config
+    from . import diag_split
+    cfg = load_config(args.config, variant=args.variant)
+    rows = diag_split.run(cfg, args.test, args.lon, args.lat, args.radius)
+    table = diag_split.render(rows)
+    print(table)
+    if args.out:
+        Path(args.out).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.out).write_text(table + "\n")
+    return 0
+
+
 def cmd_tile_timing(args) -> int:
     from .config import load_config
     from . import tiles
@@ -275,6 +288,16 @@ def main(argv=None) -> int:
     s.add_argument("--submit", action="store_true")
     s.add_argument("args", nargs=argparse.REMAINDER, help="-- <ocsmesh-test arguments>")
     s.set_defaults(fn=cmd_job)
+
+    s = sub.add_parser("diag-split", help="one tile, serial: where a split run loses channels")
+    s.add_argument("-c", "--config", required=True)
+    s.add_argument("--variant", required=True, help="option variant with hfun.split_size")
+    s.add_argument("--test", type=int, required=True)
+    s.add_argument("--lon", type=float, required=True)
+    s.add_argument("--lat", type=float, required=True)
+    s.add_argument("--radius", type=float, default=0.03, help="degrees around the point")
+    s.add_argument("--out", default=None, help="also write the table here (markdown)")
+    s.set_defaults(fn=cmd_diag_split)
 
     s = sub.add_parser("tile-timing", help="time channel detection per tile (one tile per process)")
     s.add_argument("-c", "--config", required=True)
