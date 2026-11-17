@@ -78,8 +78,10 @@ def cmd_diag_split(args) -> int:
     from .config import load_config
     from . import diag_split
     cfg = load_config(args.config, variant=args.variant)
-    rows = diag_split.run(cfg, args.test, args.lon, args.lat, args.radius)
-    table = diag_split.render(rows)
+    rows, pieces = diag_split.run(cfg, args.test, args.lon, args.lat, args.radius)
+    table = (diag_split.render(rows) + "\n\nChannel pieces near the point (unsplit: the "
+             "detected polygons; split: as the size cutoff judges them)\n\n"
+             + diag_split.render(pieces, diag_split.PIECE_KEYS))
     print(table)
     if args.out:
         Path(args.out).parent.mkdir(parents=True, exist_ok=True)

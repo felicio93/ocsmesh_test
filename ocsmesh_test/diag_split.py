@@ -86,9 +86,13 @@ def run(cfg, test_id: int, lon: float, lat: float, radius: float) -> List[Dict[s
     orig_poly = utils.get_polygon_channels
     orig_clip = hsplit.clip_to_core
     orig_drop = hsplit.drop_small_channels
+    orig_clip_ch = hsplit.clip_channels_to_core
+    pieces: List[Dict[str, Any]] = []
 
     def get_channels(self, *a, **k):
         out = orig_get_channels(self, *a, **k)
+        if state["run"] == "unsplit" and out is not None:
+            _unsplit_parts(out, self.crs)
         b = self.get_bbox(crs="EPSG:4326").bounds
         rows.append({"run": state["run"], "step": "get_channels",
                      "drop_small": k.get("drop_small", True),
@@ -112,9 +116,88 @@ def run(cfg, test_id: int, lon: float, lat: float, radius: float) -> List[Dict[s
                                                          box(*core.bounds())), lat)})
         return out
 
+    def _unsplit_parts(shape, crs):
+        import numpy as np
+        import shapely
+        parts = np.array([g for g in shapely.get_parts(shape) if g.intersects(near_box)],
+                         dtype=object)
+        if len(parts) == 0:
+            return
+        area = hsplit._area_m2(parts, crs, tuple(shapely.total_bounds(parts)))
+        for g, a in zip(parts, area):
+            pieces.append({"run": "unsplit", "km2": a / 1e6,
+                           "bounds": ",".join(f"{v:.4f}" for v in g.bounds)})
+
+    def clip_ch(shape, crs, core):
+        out = orig_clip_ch(shape, crs, core)
+        rows.append({"run": state["run"], "step": "clip_channels_to_core",
+                     "window": "core " + ",".join(f"{v:.3f}" for v in core.bounds()),
+                     "valid_in": bool(shape.is_valid), "km2": _km2(out[0], lat),
+                     "near_km2": _km2(_near(out[0], near_box), lat),
+                     "near_in_core_before_km2": _km2(_near(_near(shape, near_box),
+                                                         box(*core.bounds())), lat)})
+        return out
+
+    def _piece_detail(items, width):
+        """The pieces near the point as drop_small_channels judges them."""
+        import itertools
+        import numpy as np
+        import shapely
+        from shapely.geometry import Polygon
+        min_area = utils.channel_min_area(width)
+        groups = {}
+        for i, (shape, _, core, _) in enumerate(items):
+            if core is not None and shape is not None:
+                groups.setdefault((core.transform, core.shape, core.crs), []).append(i)
+        for idxs in groups.values():
+            crs = items[idxs[0]][1]
+            parts, owner, label = [], [], []
+            for i in idxs:
+                sp = list(shapely.get_parts(items[i][0]))
+                labs = items[i][3]
+                if labs is None or len(labs) != len(sp):
+                    labs = np.arange(len(sp))
+                for g, lab in zip(sp, labs):
+                    if isinstance(g, Polygon) and not g.is_empty:
+                        parts.append(g); owner.append(i); label.append(int(lab))
+            if not parts:
+                continue
+            parts = np.array(parts, dtype=object)
+            owner = np.array(owner)
+            area = hsplit._area_m2(parts, crs, tuple(shapely.total_bounds(parts)))
+            cores = [items[i][2] for i in owner]
+            first, same = {}, []
+            for k, key in enumerate(zip(owner, label)):
+                if key in first:
+                    same.append((first[key], k))
+                else:
+                    first[key] = k
+            seam = list(hsplit._seam_pairs(parts, owner, cores))
+            roots = hsplit._components(len(parts), itertools.chain(same, seam))
+            total = np.bincount(roots, weights=area, minlength=len(parts))
+            px = min(abs(cores[0].affine.a), abs(cores[0].affine.e))
+            for k in range(len(parts)):
+                if not parts[k].intersects(near_box):
+                    continue
+                w, s_, e, n = cores[k].bounds()
+                sides = "".join(name for name, line in (
+                    ("W", box(w, s_, w, n)), ("E", box(e, s_, e, n)),
+                    ("S", box(w, s_, e, s_)), ("N", box(w, n, e, n)))
+                    if parts[k].distance(line) < 0.01 * px)
+                pieces.append({
+                    "run": "split", "core": ",".join(f"{v:.3f}" for v in cores[k].bounds()),
+                    "label": label[k], "km2": area[k] / 1e6,
+                    "joined_km2": total[roots[k]] / 1e6,
+                    "kept": bool(total[roots[k]] > min_area),
+                    "n_in_group": int((roots == roots[k]).sum()),
+                    "touches": sides,
+                    "seam_links": sum(1 for a, b in seam if k in (a, b)),
+                    "bounds": ",".join(f"{v:.4f}" for v in parts[k].bounds)})
+
     def drop(items, width):
+        _piece_detail(items, width)
         out = orig_drop(items, width)
-        for (shape, _, core), kept in zip(items, out):
+        for (shape, _, core, _), kept in zip(items, out):
             rows.append({"run": state["run"], "step": "drop_small_channels",
                          "window": "core " + ",".join(f"{v:.3f}" for v in core.bounds())
                          if core is not None else "unsplit",
@@ -127,7 +210,8 @@ def run(cfg, test_id: int, lon: float, lat: float, radius: float) -> List[Dict[s
     with mock.patch.object(ocsmesh.Raster, "get_channels", get_channels), \
             mock.patch.object(utils, "get_polygon_channels", poly), \
             mock.patch.object(hsplit, "clip_to_core", clip), \
-            mock.patch.object(hsplit, "drop_small_channels", drop):
+            mock.patch.object(hsplit, "drop_small_channels", drop), \
+            mock.patch.object(hsplit, "clip_channels_to_core", clip_ch):
         for run_name, split_size in (("unsplit", None), ("split", hfun_opts.get("split_size"))):
             state["run"] = run_name
             cfg.raw.setdefault("hfun_options", {})
@@ -138,17 +222,21 @@ def run(cfg, test_id: int, lon: float, lat: float, radius: float) -> List[Dict[s
                                   execution_mode="serial", method="exact", test=test)
                 hfun._apply_features()  # pylint: disable=protected-access
     cfg.raw["hfun_options"] = hfun_opts
-    return rows
+    return rows, pieces
 
 
-def render(rows: List[Dict[str, Any]]) -> str:
-    keys = ["run", "step", "window", "drop_small", "all_channel", "valid_in", "type",
-            "km2", "near_km2", "near_in_km2", "near_in_core_before_km2"]
+PIECE_KEYS = ["run", "core", "label", "km2", "joined_km2", "kept", "n_in_group",
+              "touches", "seam_links", "bounds"]
+
+
+def render(rows: List[Dict[str, Any]], keys=None) -> str:
+    keys = keys or ["run", "step", "window", "drop_small", "all_channel", "valid_in", "type",
+                    "km2", "near_km2", "near_in_km2", "near_in_core_before_km2"]
     lines = ["| " + " | ".join(keys) + " |", "|" + "---|" * len(keys)]
     for r in rows:
         cells = []
         for k in keys:
             v = r.get(k, "")
-            cells.append(f"{v:.3f}" if isinstance(v, float) else str(v))
+            cells.append(f"{v:.4f}" if isinstance(v, float) else str(v))
         lines.append("| " + " | ".join(cells) + " |")
     return "\n".join(lines)
