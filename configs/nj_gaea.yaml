@@ -98,6 +98,10 @@ dems:
                         refinements: {channels: {resampling_factor: 0.125}}}
     ch0125_rf1_sp2700: {hfun: {resampling_factor: 1.0, split_size: 2700},
                         refinements: {channels: {resampling_factor: 0.125}}}
+    # each refinement's chosen resampling, split 2x2 per tile (compare with rf1 /
+    # rf05_min run in the same mode; flow limiters use sp4100 on the native DEM)
+    rf1_sp4100:      {hfun: {resampling_factor: 1.0, split_size: 4100}}
+    rf05_min_sp4100: {hfun: {resampling_factor: 0.5, resampling_method: min, split_size: 4100}}
 
 mesh:
   hmin: 50.0
