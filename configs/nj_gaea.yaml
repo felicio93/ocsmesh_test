@@ -111,6 +111,9 @@ dems:
                          refinements: {channels: {resampling_factor: 0.125}}}
     rf05_min_dsp4100:   {hfun: {resampling_factor: 0.5, resampling_method: min, split_size: 4100}}
     rf1_dsp4100:        {hfun: {resampling_factor: 1.0, split_size: 4100}}
+    # resampling_factor='optimum' and split_size='optimum' (feat/split-detection):
+    # the NJ values for every refinement that does not set its own
+    optimum:            {hfun: {resampling_factor: optimum, split_size: optimum}}
 
 mesh:
   hmin: 50.0
