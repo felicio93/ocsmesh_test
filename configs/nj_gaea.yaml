@@ -102,6 +102,15 @@ dems:
     # rf05_min run in the same mode; flow limiters use sp4100 on the native DEM)
     rf1_sp4100:      {hfun: {resampling_factor: 1.0, split_size: 4100}}
     rf05_min_sp4100: {hfun: {resampling_factor: 0.5, resampling_method: min, split_size: 4100}}
+    # OCSMesh feat/split-detection: split_size splits only channel/contour
+    # detection (size functions stay whole); own folders, so the runs of the
+    # first design (sp* above, feat/split-tiles) are kept
+    ch0125_rf1_dsp4100: {hfun: {resampling_factor: 1.0, split_size: 4100},
+                         refinements: {channels: {resampling_factor: 0.125}}}
+    ch0125_rf1_dsp2700: {hfun: {resampling_factor: 1.0, split_size: 2700},
+                         refinements: {channels: {resampling_factor: 0.125}}}
+    rf05_min_dsp4100:   {hfun: {resampling_factor: 0.5, resampling_method: min, split_size: 4100}}
+    rf1_dsp4100:        {hfun: {resampling_factor: 1.0, split_size: 4100}}
 
 mesh:
   hmin: 50.0
